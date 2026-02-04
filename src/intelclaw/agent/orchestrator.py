@@ -94,7 +94,8 @@ class AgentOrchestrator(BaseAgent):
         self.sub_agents: Dict[str, BaseAgent] = {}
         
         # LangGraph components (initialized later)
-        self._llm: Optional[ChatOpenAI] = None
+        self._llm_provider: Optional[LLMProvider] = None
+        self._llm = None  # Will be set from provider
         self._graph: Optional[StateGraph] = None
         self._compiled_graph = None
         self._langchain_tools: List[BaseTool] = []
@@ -109,13 +110,19 @@ class AgentOrchestrator(BaseAgent):
         """Initialize the orchestrator and build the LangGraph."""
         logger.info("Initializing AgentOrchestrator...")
         
-        # Initialize LLM
+        # Initialize LLM via unified provider (supports Copilot, OpenAI, Anthropic)
         model_config = self.config.get("models", {})
-        self._llm = ChatOpenAI(
-            model=model_config.get("primary", self.MODEL_NAME),
-            temperature=0.1,
-            streaming=True,
-        )
+        llm_config = self.config.get("llm", {})
+        
+        self._llm_provider = LLMProvider({
+            "model": model_config.get("primary", self.MODEL_NAME),
+            "temperature": 0.1,
+            "provider": llm_config.get("provider", "auto"),
+        })
+        await self._llm_provider.initialize()
+        self._llm = self._llm_provider.llm
+        
+        logger.info(f"Using LLM provider: {self._llm_provider.active_provider}")
         
         # Get tools from registry
         if self.tools:
@@ -499,3 +506,51 @@ You have access to various tools to help accomplish tasks.
     async def can_handle(self, context: AgentContext) -> float:
         """Orchestrator can handle anything."""
         return 1.0
+    
+    async def change_model(self, model_name: str, provider: Optional[str] = None) -> bool:
+        """
+        Dynamically change the LLM model.
+        
+        Args:
+            model_name: Name of the model to switch to
+            provider: Optional provider override (copilot, openai, anthropic)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Changing model to: {model_name} (provider: {provider or 'auto'})")
+            
+            new_config = {
+                "model": model_name,
+                "temperature": 0.1,
+            }
+            if provider:
+                new_config["provider"] = provider
+            
+            new_provider = LLMProvider(new_config)
+            await new_provider.initialize()
+            
+            # Swap the provider
+            self._llm_provider = new_provider
+            self._llm = new_provider.llm
+            
+            # Rebuild the graph with new LLM
+            self._build_graph()
+            
+            logger.info(f"Successfully changed to model: {model_name} via {new_provider.active_provider}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to change model: {e}")
+            return False
+    
+    def get_current_model_info(self) -> Dict[str, Any]:
+        """Get information about the current LLM configuration."""
+        if self._llm_provider:
+            return {
+                "provider": self._llm_provider.active_provider,
+                "model": getattr(self._llm, "model_name", self.MODEL_NAME),
+                "available_providers": self._llm_provider.available_providers,
+            }
+        return {"provider": "unknown", "model": self.MODEL_NAME}
