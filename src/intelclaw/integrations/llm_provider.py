@@ -5,14 +5,17 @@ This module enables IntelCLaw to use GitHub's AI models
 through the GitHub Models API (https://github.com/marketplace/models).
 
 This works with any GitHub account and uses the free GitHub Models API.
-You need a GitHub Personal Access Token (PAT) to use this service.
+You need a GitHub Personal Access Token (PAT) with `models:read` permission.
 
 To get started:
-1. Go to https://github.com/settings/tokens
-2. Create a new token (classic) with no special scopes required
-3. Set the token as GITHUB_TOKEN environment variable
+1. Visit https://github.com/marketplace/models and accept the terms
+2. Go to https://github.com/settings/tokens?type=beta (Fine-grained tokens)
+3. Create a new token with 'Models' read permission (under Account permissions)
+4. Set the token: set GITHUB_TOKEN=your_token_here
 
-The API provides access to models like GPT-4o, GPT-4o-mini, Llama, Mistral, and more.
+Alternatively for heavy tasks, set ANTHROPIC_API_KEY for Claude fallback.
+
+Available models: gpt-4o, gpt-4o-mini, o1-preview, o1-mini, Llama, Mistral, DeepSeek, Phi, etc.
 """
 
 import asyncio
@@ -28,11 +31,12 @@ from typing import Any, Dict, List, Optional, AsyncIterator
 from loguru import logger
 
 
-# GitHub OAuth App Client ID for Copilot (same as VS Code uses)
+# GitHub OAuth App Client ID for Copilot (used for OAuth device flow)
 GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 
 # GitHub Models API endpoint - uses Azure AI inference
-# See: https://github.com/marketplace/models/azure-openai/gpt-4o-mini
+# IMPORTANT: This requires a Personal Access Token (PAT) with models:read permission
+# See: https://docs.github.com/en/github-models/prototyping-with-ai-models
 GITHUB_MODELS_API_URL = "https://models.inference.ai.azure.com/chat/completions"
 
 # Model ID mappings for GitHub Models API
@@ -119,89 +123,46 @@ class GitHubAuth:
             logger.info("Saved token expired, re-authenticating...")
         
         print("\n" + "=" * 60)
-        print("🔐 GitHub Copilot Authentication Required")
+        print("🔐 GitHub Models API - Personal Access Token Required")
         print("=" * 60)
+        print("\nThe GitHub Models API requires a Personal Access Token (PAT).")
+        print("\n📌 To create your token:")
+        print("   1. Visit: https://github.com/settings/tokens?type=beta")
+        print("   2. Click 'Generate new token'")
+        print("   3. Give it a name like 'IntelCLaw'")
+        print("   4. Under 'Account permissions', find 'Models' and set to 'Read'")
+        print("   5. Click 'Generate token' and copy it")
+        print("\n" + "-" * 60)
         
+        # Open browser to token page
+        token_url = "https://github.com/settings/tokens?type=beta"
+        print(f"\n🌐 Opening: {token_url}")
+        webbrowser.open(token_url)
+        
+        # Prompt user for token
+        print("\n📋 Paste your token below (input hidden):")
         try:
-            # Step 1: Request device code
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://github.com/login/device/code",
-                    headers={"Accept": "application/json"},
-                    data={
-                        "client_id": GITHUB_CLIENT_ID,
-                        "scope": "read:user copilot"
-                    }
-                ) as response:
-                    if response.status != 200:
-                        logger.error(f"Failed to get device code: {await response.text()}")
-                        return None
-                    
-                    data = await response.json()
-            
-            device_code = data["device_code"]
-            user_code = data["user_code"]
-            verification_uri = data["verification_uri"]
-            expires_in = data.get("expires_in", 900)
-            interval = data.get("interval", 5)
-            
-            # Step 2: Show instructions to user
-            print(f"\n📋 Your authentication code: {user_code}")
-            print(f"\n🌐 Opening: {verification_uri}")
-            print(f"\n1. Enter the code above on the GitHub page")
-            print(f"2. Authorize IntelCLaw to use GitHub Copilot")
-            print(f"3. Wait for confirmation here...\n")
-            
-            # Open browser
-            webbrowser.open(verification_uri)
-            
-            # Step 3: Poll for token
-            print("⏳ Waiting for authorization", end="", flush=True)
-            
-            start_time = time.time()
-            async with aiohttp.ClientSession() as session:
-                while time.time() - start_time < expires_in:
-                    await asyncio.sleep(interval)
-                    print(".", end="", flush=True)
-                    
-                    async with session.post(
-                        "https://github.com/login/oauth/access_token",
-                        headers={"Accept": "application/json"},
-                        data={
-                            "client_id": GITHUB_CLIENT_ID,
-                            "device_code": device_code,
-                            "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-                        }
-                    ) as response:
-                        token_data = await response.json()
-                        
-                        if "access_token" in token_data:
-                            access_token = token_data["access_token"]
-                            cls._save_token(access_token)
-                            print("\n\n✅ Authentication successful!")
-                            print("=" * 60 + "\n")
-                            return access_token
-                        
-                        error = token_data.get("error")
-                        if error == "authorization_pending":
-                            continue
-                        elif error == "slow_down":
-                            interval += 5
-                        elif error == "expired_token":
-                            print("\n\n❌ Authorization expired. Please try again.")
-                            return None
-                        elif error == "access_denied":
-                            print("\n\n❌ Authorization denied by user.")
-                            return None
-                        else:
-                            logger.debug(f"Token poll response: {token_data}")
-            
-            print("\n\n❌ Authorization timed out. Please try again.")
+            import getpass
+            token = getpass.getpass("Token: ").strip()
+        except Exception:
+            # Fallback if getpass doesn't work
+            token = input("Token: ").strip()
+        
+        if not token:
+            print("\n❌ No token provided.")
             return None
-            
-        except Exception as e:
-            logger.error(f"Authentication error: {e}")
-            print(f"\n\n❌ Authentication failed: {e}")
+        
+        # Verify the token works
+        if await cls._verify_token(token):
+            cls._save_token(token)
+            print("\n✅ Token verified and saved!")
+            print("=" * 60 + "\n")
+            return token
+        else:
+            print("\n❌ Token verification failed. Please ensure:")
+            print("   - The token has 'Models: Read' permission")
+            print("   - You've accepted the GitHub Models terms at:")
+            print("     https://github.com/marketplace/models")
             return None
     
     @classmethod
@@ -660,12 +621,42 @@ class CopilotLLM:
 
 
 class CopilotResponse:
-    """Response from Copilot LLM."""
+    """
+    Response from Copilot LLM - LangChain compatible.
+    
+    This class mimics LangChain's AIMessage so it can be used
+    seamlessly in LangChain chains and agents.
+    """
     
     def __init__(self, content: str):
         self.content = content
+        # LangChain compatibility attributes
+        self.type = "ai"
+        self.response_metadata = {}
+        self.additional_kwargs = {}
+        self.id = None
+        self.name = None
     
     def __str__(self) -> str:
+        return self.content
+    
+    def __repr__(self) -> str:
+        return f"CopilotResponse(content='{self.content[:50]}...')" if len(self.content) > 50 else f"CopilotResponse(content='{self.content}')"
+    
+    # LangChain message protocol methods
+    def to_json(self) -> dict:
+        """Convert to JSON-serializable dict."""
+        return {"type": "ai", "content": self.content}
+    
+    @classmethod
+    def from_json(cls, data: dict) -> "CopilotResponse":
+        """Create from JSON dict."""
+        return cls(content=data.get("content", ""))
+    
+    # Make it behave like LangChain AIMessage
+    @property
+    def text(self) -> str:
+        """Alias for content (backwards compatibility)."""
         return self.content
 
 

@@ -237,37 +237,89 @@ class AuthManager:
     
     async def login_github_models(self, profile_id: Optional[str] = None) -> Optional[AuthProfile]:
         """
-        Login to GitHub Models API using device OAuth flow.
+        Login to GitHub Models API using Personal Access Token.
         
-        This is the FREE alternative to Copilot - works with any GitHub account.
+        The GitHub Models API requires a PAT with 'models:read' permission.
+        This is FREE and works with any GitHub account.
         """
         profile_id = profile_id or "github-models:default"
         
-        print("\n🦞 GitHub Models API Authentication")
-        print("=" * 40)
-        print("This is FREE and works with any GitHub account!")
+        print("\n🦅 GitHub Models API Authentication")
+        print("=" * 50)
+        print("The GitHub Models API requires a Personal Access Token (PAT)")
+        print("with 'Models: Read' permission.")
+        print()
+        print("📌 To create your token:")
+        print("   1. Visit: https://github.com/settings/tokens?type=beta")
+        print("   2. Click 'Generate new token'")
+        print("   3. Give it a name like 'IntelCLaw'")
+        print("   4. Under 'Account permissions' → 'Models' → set to 'Read'")
+        print("   5. Click 'Generate token' and copy it")
         print()
         
-        # Get GitHub token via device flow
-        github_token = await self._github_device_flow()
-        if not github_token:
-            print("❌ GitHub authentication failed")
+        # Open browser to token page
+        token_url = "https://github.com/settings/tokens?type=beta"
+        print(f"🌐 Opening: {token_url}")
+        try:
+            webbrowser.open(token_url)
+            print("   (Browser opened automatically)")
+        except:
+            pass
+        
+        print()
+        
+        # Prompt user for token
+        try:
+            import getpass
+            token = getpass.getpass("📋 Paste your token here: ").strip()
+        except Exception:
+            # Fallback if getpass doesn't work
+            token = input("📋 Paste your token here: ").strip()
+        
+        if not token:
+            print("\n❌ No token provided.")
             return None
         
-        # Create and save profile (no Copilot token exchange needed)
+        # Verify the token works with GitHub API
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                    "X-GitHub-Api-Version": "2022-11-28"
+                }
+            ) as response:
+                if response.status != 200:
+                    print("\n❌ Token verification failed!")
+                    print("   Please ensure:")
+                    print("   - The token is valid (not expired)")
+                    print("   - You've visited https://github.com/marketplace/models")
+                    print("     and accepted the terms")
+                    return None
+                
+                user_data = await response.json()
+                username = user_data.get("login", "unknown")
+        
+        # Create and save profile
         profile = AuthProfile(
             provider="github-models",
             profile_id=profile_id,
-            mode="oauth",
-            access_token=github_token,
-            # GitHub tokens don't expire unless revoked
+            mode="token",  # PAT mode
+            access_token=token,
+            email=username,
+            # PATs don't expire unless revoked
             expires_at=None,
         )
         self.save_profile(profile)
         
-        print("\n✅ GitHub Models API authentication successful!")
+        print(f"\n✅ GitHub Models API authentication successful!")
+        print(f"   User: {username}")
         print(f"   Profile: {profile_id}")
-        print("   Available models: gpt-4o, claude-3.5-sonnet, llama-3.3-70b, deepseek-r1")
+        print("   Available models: gpt-4o-mini (default), gpt-4o, llama-3, deepseek, phi-4")
+        print()
+        print("💡 To start the web interface:")
+        print("   intelclaw gateway")
         
         return profile
     
