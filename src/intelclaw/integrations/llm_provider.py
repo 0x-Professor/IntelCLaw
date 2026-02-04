@@ -9,10 +9,180 @@ import asyncio
 import json
 import os
 import subprocess
+import webbrowser
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, AsyncIterator
 
 from loguru import logger
+
+
+# GitHub OAuth App Client ID for Copilot
+GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"  # VS Code GitHub Copilot client ID
+
+
+class GitHubAuth:
+    """
+    GitHub OAuth Device Flow Authentication.
+    
+    This allows users to authenticate with GitHub to use Copilot
+    without needing to manually copy tokens.
+    """
+    
+    TOKEN_FILE = Path.home() / ".intelclaw" / "github_token.json"
+    
+    @classmethod
+    async def authenticate(cls) -> Optional[str]:
+        """
+        Perform GitHub OAuth device flow authentication.
+        
+        Returns:
+            Access token if successful, None otherwise
+        """
+        import aiohttp
+        
+        # Check for existing token first
+        existing_token = cls._load_saved_token()
+        if existing_token:
+            # Verify token is still valid
+            if await cls._verify_token(existing_token):
+                return existing_token
+            logger.info("Saved token expired, re-authenticating...")
+        
+        print("\n" + "=" * 60)
+        print("🔐 GitHub Copilot Authentication Required")
+        print("=" * 60)
+        
+        try:
+            # Step 1: Request device code
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://github.com/login/device/code",
+                    headers={"Accept": "application/json"},
+                    data={
+                        "client_id": GITHUB_CLIENT_ID,
+                        "scope": "read:user copilot"
+                    }
+                ) as response:
+                    if response.status != 200:
+                        logger.error(f"Failed to get device code: {await response.text()}")
+                        return None
+                    
+                    data = await response.json()
+            
+            device_code = data["device_code"]
+            user_code = data["user_code"]
+            verification_uri = data["verification_uri"]
+            expires_in = data.get("expires_in", 900)
+            interval = data.get("interval", 5)
+            
+            # Step 2: Show instructions to user
+            print(f"\n📋 Your authentication code: {user_code}")
+            print(f"\n🌐 Opening: {verification_uri}")
+            print(f"\n1. Enter the code above on the GitHub page")
+            print(f"2. Authorize IntelCLaw to use GitHub Copilot")
+            print(f"3. Wait for confirmation here...\n")
+            
+            # Open browser
+            webbrowser.open(verification_uri)
+            
+            # Step 3: Poll for token
+            print("⏳ Waiting for authorization", end="", flush=True)
+            
+            start_time = time.time()
+            async with aiohttp.ClientSession() as session:
+                while time.time() - start_time < expires_in:
+                    await asyncio.sleep(interval)
+                    print(".", end="", flush=True)
+                    
+                    async with session.post(
+                        "https://github.com/login/oauth/access_token",
+                        headers={"Accept": "application/json"},
+                        data={
+                            "client_id": GITHUB_CLIENT_ID,
+                            "device_code": device_code,
+                            "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+                        }
+                    ) as response:
+                        token_data = await response.json()
+                        
+                        if "access_token" in token_data:
+                            access_token = token_data["access_token"]
+                            cls._save_token(access_token)
+                            print("\n\n✅ Authentication successful!")
+                            print("=" * 60 + "\n")
+                            return access_token
+                        
+                        error = token_data.get("error")
+                        if error == "authorization_pending":
+                            continue
+                        elif error == "slow_down":
+                            interval += 5
+                        elif error == "expired_token":
+                            print("\n\n❌ Authorization expired. Please try again.")
+                            return None
+                        elif error == "access_denied":
+                            print("\n\n❌ Authorization denied by user.")
+                            return None
+                        else:
+                            logger.debug(f"Token poll response: {token_data}")
+            
+            print("\n\n❌ Authorization timed out. Please try again.")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Authentication error: {e}")
+            print(f"\n\n❌ Authentication failed: {e}")
+            return None
+    
+    @classmethod
+    def _save_token(cls, token: str) -> None:
+        """Save token to file."""
+        cls.TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        cls.TOKEN_FILE.write_text(json.dumps({
+            "access_token": token,
+            "saved_at": time.time()
+        }), encoding="utf-8")
+        # Set restrictive permissions
+        try:
+            os.chmod(cls.TOKEN_FILE, 0o600)
+        except:
+            pass
+    
+    @classmethod
+    def _load_saved_token(cls) -> Optional[str]:
+        """Load token from file."""
+        if cls.TOKEN_FILE.exists():
+            try:
+                data = json.loads(cls.TOKEN_FILE.read_text(encoding="utf-8"))
+                return data.get("access_token")
+            except Exception as e:
+                logger.debug(f"Could not load saved token: {e}")
+        return None
+    
+    @classmethod
+    async def _verify_token(cls, token: str) -> bool:
+        """Verify token is still valid."""
+        import aiohttp
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.github.com/user",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/json"
+                    }
+                ) as response:
+                    return response.status == 200
+        except:
+            return False
+    
+    @classmethod
+    def clear_token(cls) -> None:
+        """Clear saved token."""
+        if cls.TOKEN_FILE.exists():
+            cls.TOKEN_FILE.unlink()
+            print("✅ GitHub token cleared.")
 
 
 class CopilotLLM:
@@ -37,7 +207,7 @@ class CopilotLLM:
     
     async def initialize(self) -> bool:
         """Initialize connection to Copilot."""
-        # Try to get Copilot token from VS Code
+        # Try to get Copilot token from various sources
         token = await self._get_copilot_token()
         if token:
             self._copilot_token = token
@@ -49,16 +219,24 @@ class CopilotLLM:
         return False
     
     async def _get_copilot_token(self) -> Optional[str]:
-        """Get GitHub Copilot token from VS Code."""
-        # Check environment variable first
-        token = os.environ.get("GITHUB_COPILOT_TOKEN")
+        """Get GitHub Copilot token from various sources."""
+        # 1. Check environment variable first
+        token = os.environ.get("GITHUB_COPILOT_TOKEN") or os.environ.get("GITHUB_TOKEN")
         if token:
+            logger.debug("Using token from environment variable")
             return token
         
-        # Try to read from VS Code Copilot extension storage
+        # 2. Check saved IntelCLaw token
+        saved_token = GitHubAuth._load_saved_token()
+        if saved_token:
+            logger.debug("Using saved IntelCLaw token")
+            return saved_token
+        
+        # 3. Try to read from VS Code Copilot extension storage
         possible_paths = [
             Path(os.path.expanduser("~")) / "AppData" / "Roaming" / "Code" / "User" / "globalStorage" / "github.copilot" / "hosts.json",
-            Path(os.path.expanduser("~")) / "AppData" / "Roaming" / "Code" / "User" / "globalStorage" / "github.copilot-chat" / "token.json",
+            Path(os.path.expanduser("~")) / "AppData" / "Roaming" / "Code" / "User" / "globalStorage" / "github.copilot-chat" / "hosts.json",
+            Path(os.path.expanduser("~")) / "AppData" / "Roaming" / "Code - Insiders" / "User" / "globalStorage" / "github.copilot" / "hosts.json",
             Path(os.path.expanduser("~")) / ".config" / "github-copilot" / "hosts.json",
         ]
         
@@ -71,6 +249,7 @@ class CopilotLLM:
                         for key, value in data.items():
                             if "github.com" in key and isinstance(value, dict):
                                 if "oauth_token" in value:
+                                    logger.debug(f"Using token from VS Code: {path}")
                                     return value["oauth_token"]
                         # Or direct token
                         if "token" in data:
@@ -78,7 +257,7 @@ class CopilotLLM:
                 except Exception as e:
                     logger.debug(f"Could not read token from {path}: {e}")
         
-        # Try GitHub CLI token
+        # 4. Try GitHub CLI token
         try:
             result = subprocess.run(
                 ["gh", "auth", "token"],
@@ -87,11 +266,14 @@ class CopilotLLM:
                 timeout=5
             )
             if result.returncode == 0 and result.stdout.strip():
+                logger.debug("Using token from GitHub CLI")
                 return result.stdout.strip()
         except Exception:
             pass
         
-        return None
+        # 5. No token found - trigger interactive auth
+        logger.info("No GitHub token found, starting interactive authentication...")
+        return await GitHubAuth.authenticate()
     
     async def ainvoke(self, prompt: str, **kwargs) -> "CopilotResponse":
         """
