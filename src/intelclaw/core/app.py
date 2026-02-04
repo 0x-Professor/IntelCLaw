@@ -130,10 +130,14 @@ class IntelCLawApp:
         await self.self_improvement.initialize(self.agent._llm if hasattr(self.agent, '_llm') else None)
         logger.info("Self-improvement module initialized")
         
-        # 7. Initialize UI components
-        self.tray = SystemTray(self)
-        self.overlay = OverlayWindow(self)
-        logger.info("UI components initialized")
+        # 7. Initialize UI components (skip in web mode)
+        import os
+        if not os.environ.get("INTELCLAW_NO_QT"):
+            self.tray = SystemTray(self)
+            self.overlay = OverlayWindow(self)
+            logger.info("UI components initialized")
+        else:
+            logger.info("Running in web mode - Qt UI disabled")
         
         self._running = True
         logger.success("IntelCLaw started successfully!")

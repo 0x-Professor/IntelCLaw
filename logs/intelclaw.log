@@ -454,3 +454,61 @@ TypeError: tool() got an unexpected keyword argument 'name'
 2026-02-04 18:12:27 | ERROR    | intelclaw.perception.screen_capture:capture:129 - Screenshot capture failed: '_thread._local' object has no attribute 'srcdc'
 2026-02-04 18:12:32 | ERROR    | intelclaw.perception.screen_capture:capture:129 - Screenshot capture failed: '_thread._local' object has no attribute 'srcdc'
 2026-02-04 18:12:37 | ERROR    | intelclaw.perception.screen_capture:capture:129 - Screenshot capture failed: '_thread._local' object has no attribute 'srcdc'
+2026-02-04 18:18:35 | INFO     | __main__:run_web_server:183 - ==================================================
+2026-02-04 18:18:35 | INFO     | __main__:run_web_server:184 - IntelCLaw - Web Interface
+2026-02-04 18:18:35 | INFO     | __main__:run_web_server:185 - ==================================================
+2026-02-04 18:18:38 | WARNING  | intelclaw.perception.ui_automation:<module>:20 - win32 modules not available
+2026-02-04 18:18:40 | INFO     | intelclaw.core.app:__init__:75 - IntelCLaw application instance created
+2026-02-04 18:18:40 | ERROR    | __main__:run_web_server:214 - Fatal error: name 'os' is not defined
+Traceback (most recent call last):
+
+  File "M:\IntelCLaw\main.py", line 219, in <module>
+    cli()
+    └ <function cli at 0x00000209B9C4D580>
+
+  File "M:\IntelCLaw\main.py", line 174, in cli
+    asyncio.run(run_web_server(args.host, args.port))
+    │       │   │              │    │     │    └ 8765
+    │       │   │              │    │     └ Namespace(config='config.yaml', safe_mode=False, reset_memory=False, debug=False, auth=False, logout=False, web=True, port=87...
+    │       │   │              │    └ '127.0.0.1'
+    │       │   │              └ Namespace(config='config.yaml', safe_mode=False, reset_memory=False, debug=False, auth=False, logout=False, web=True, port=87...
+    │       │   └ <function run_web_server at 0x00000209B9C68680>
+    │       └ <function run at 0x00000209B9538360>
+    └ <module 'asyncio' from 'C:\\Program Files\\Python313\\Lib\\asyncio\\__init__.py'>
+
+  File "C:\Program Files\Python313\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           │      │   └ <coroutine object run_web_server at 0x00000209B9C655A0>
+           │      └ <function Runner.run at 0x00000209B9A26C00>
+           └ <asyncio.runners.Runner object at 0x00000209B9C23620>
+  File "C:\Program Files\Python313\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           │    │     │                  └ <Task pending name='Task-1' coro=<run_web_server() running at M:\IntelCLaw\main.py:214> cb=[_run_until_complete_cb() at C:\Pr...
+           │    │     └ <function BaseEventLoop.run_until_complete at 0x00000209B9A247C0>
+           │    └ <ProactorEventLoop running=True closed=False debug=False>
+           └ <asyncio.runners.Runner object at 0x00000209B9C23620>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+    self.run_forever()
+    │    └ <function BaseEventLoop.run_forever at 0x00000209B9A24720>
+    └ <ProactorEventLoop running=True closed=False debug=False>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+    self._run_once()
+    │    └ <function BaseEventLoop._run_once at 0x00000209B9A26520>
+    └ <ProactorEventLoop running=True closed=False debug=False>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 2040, in _run_once
+    handle._run()
+    │      └ <function Handle._run at 0x00000209B95396C0>
+    └ <Handle <_asyncio.TaskStepMethWrapper object at 0x00000209B9C1B1C0>()>
+  File "C:\Program Files\Python313\Lib\asyncio\events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+    │    │            │    │           │    └ <member '_args' of 'Handle' objects>
+    │    │            │    │           └ <Handle <_asyncio.TaskStepMethWrapper object at 0x00000209B9C1B1C0>()>
+    │    │            │    └ <member '_callback' of 'Handle' objects>
+    │    │            └ <Handle <_asyncio.TaskStepMethWrapper object at 0x00000209B9C1B1C0>()>
+    │    └ <member '_context' of 'Handle' objects>
+    └ <Handle <_asyncio.TaskStepMethWrapper object at 0x00000209B9C1B1C0>()>
+
+> File "M:\IntelCLaw\main.py", line 196, in run_web_server
+    os.environ["INTELCLAW_NO_QT"] = "true"
+
+NameError: name 'os' is not defined. Did you forget to import 'os'?
