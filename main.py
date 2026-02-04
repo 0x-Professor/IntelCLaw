@@ -91,8 +91,96 @@ def cli():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="IntelCLaw - Autonomous AI Agent for Windows"
+        description="IntelCLaw - Autonomous AI Agent for Windows",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Commands:
+  intelclaw onboard              Run the onboarding wizard
+  intelclaw --web                Start web interface
+  intelclaw --auth               Authenticate with GitHub
+  intelclaw models status        Check auth status
+  intelclaw models auth login    Login to a provider
+
+Examples:
+  intelclaw onboard              # First-time setup
+  intelclaw --web --port 8765    # Start web chat
+  intelclaw models status        # Check authentication
+"""
     )
+    
+    # Add subcommands
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+    
+    # onboard command
+    onboard_parser = subparsers.add_parser(
+        "onboard",
+        help="Run the onboarding wizard"
+    )
+    onboard_parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Run without prompts"
+    )
+    onboard_parser.add_argument(
+        "--auth-choice",
+        choices=["github-copilot", "github-models", "openai", "anthropic", "skip"],
+        help="Pre-select authentication method"
+    )
+    onboard_parser.add_argument(
+        "--workspace",
+        type=str,
+        help="Workspace directory"
+    )
+    onboard_parser.add_argument(
+        "--gateway-port",
+        type=int,
+        default=8765,
+        help="Gateway port"
+    )
+    
+    # models command
+    models_parser = subparsers.add_parser(
+        "models",
+        help="Model and auth management"
+    )
+    models_subparsers = models_parser.add_subparsers(dest="models_command")
+    
+    # models status
+    models_subparsers.add_parser("status", help="Show auth status")
+    
+    # models list
+    models_subparsers.add_parser("list", help="List available models")
+    
+    # models auth
+    auth_parser = models_subparsers.add_parser("auth", help="Authentication")
+    auth_subparsers = auth_parser.add_subparsers(dest="auth_command")
+    
+    # models auth login
+    login_parser = auth_subparsers.add_parser("login", help="Login to a provider")
+    login_parser.add_argument(
+        "--provider",
+        choices=["github-copilot", "github-models", "openai", "anthropic"],
+        required=True,
+        help="Provider to authenticate with"
+    )
+    
+    # models auth logout
+    logout_parser = auth_subparsers.add_parser("logout", help="Logout from a provider")
+    logout_parser.add_argument(
+        "--provider",
+        required=True,
+        help="Provider to logout from"
+    )
+    
+    # configure command
+    subparsers.add_parser("configure", help="Reconfigure settings")
+    
+    # gateway command (future)
+    gateway_parser = subparsers.add_parser("gateway", help="Run gateway server")
+    gateway_parser.add_argument("--port", type=int, default=8765)
+    gateway_parser.add_argument("--host", default="127.0.0.1")
+    
+    # Main parser arguments
     parser.add_argument(
         "--config",
         type=str,
@@ -149,7 +237,76 @@ def cli():
     
     args = parser.parse_args()
     
-    # Handle auth commands
+    # Handle subcommands
+    if args.command == "onboard":
+        from intelclaw.cli.onboard import run_onboard
+        asyncio.run(run_onboard(
+            non_interactive=args.non_interactive,
+            auth_choice=args.auth_choice,
+            workspace=args.workspace,
+            gateway_port=args.gateway_port,
+        ))
+        return
+    
+    elif args.command == "models":
+        from intelclaw.cli.auth import AuthManager
+        auth_manager = AuthManager()
+        
+        if args.models_command == "status":
+            auth_manager.print_status()
+            return
+        
+        elif args.models_command == "list":
+            print("\n📋 Available Models")
+            print("=" * 50)
+            for provider, info in auth_manager.PROVIDERS.items():
+                print(f"\n{info['name']} ({provider})")
+                for model in info["models"]:
+                    print(f"  • {provider}/{model}")
+            return
+        
+        elif args.models_command == "auth":
+            if args.auth_command == "login":
+                if args.provider == "github-copilot":
+                    asyncio.run(auth_manager.login_github_copilot())
+                elif args.provider == "github-models":
+                    asyncio.run(auth_manager.login_github_models())
+                elif args.provider == "openai":
+                    api_key = input("Enter your OpenAI API key: ").strip()
+                    if api_key:
+                        auth_manager.save_api_key("openai", api_key)
+                        print("✅ OpenAI API key saved!")
+                elif args.provider == "anthropic":
+                    api_key = input("Enter your Anthropic API key: ").strip()
+                    if api_key:
+                        auth_manager.save_api_key("anthropic", api_key)
+                        print("✅ Anthropic API key saved!")
+                return
+            
+            elif args.auth_command == "logout":
+                profile_id = f"{args.provider}:default"
+                if auth_manager.delete_profile(profile_id):
+                    print(f"✅ Logged out from {args.provider}")
+                else:
+                    print(f"❌ No profile found for {args.provider}")
+                return
+        
+        # Default: show status
+        auth_manager.print_status()
+        return
+    
+    elif args.command == "configure":
+        # Re-run onboard in modify mode
+        from intelclaw.cli.onboard import run_onboard
+        asyncio.run(run_onboard())
+        return
+    
+    elif args.command == "gateway":
+        # Run as gateway (web server only)
+        asyncio.run(run_web_server(args.host, args.port))
+        return
+    
+    # Handle legacy auth commands
     if args.auth:
         from intelclaw.integrations.llm_provider import GitHubAuth
         asyncio.run(GitHubAuth.authenticate())
