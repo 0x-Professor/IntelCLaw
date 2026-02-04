@@ -510,6 +510,44 @@ class CopilotLLM:
             logger.error("Could not get Copilot API token. Make sure you have an active GitHub Copilot subscription.")
             return False
     
+    async def _ensure_token_valid(self) -> bool:
+        """
+        Ensure Copilot token is still valid, refresh if needed.
+        
+        GitHub Copilot tokens expire after ~30 minutes. This method
+        checks expiration and automatically refreshes the token.
+        """
+        if not self._copilot_token:
+            return False
+        
+        # Check if token is about to expire (5 min buffer)
+        if self._copilot_token_expires_at:
+            time_remaining = self._copilot_token_expires_at - time.time()
+            if time_remaining < 300:  # Less than 5 minutes
+                logger.info(f"Copilot token expiring in {time_remaining:.0f}s, refreshing...")
+                
+                # Clear cached token to force refresh
+                if self.COPILOT_TOKEN_CACHE.exists():
+                    try:
+                        self.COPILOT_TOKEN_CACHE.unlink()
+                    except:
+                        pass
+                
+                # Get fresh token
+                if self._github_token:
+                    copilot_result = await self._get_copilot_token(self._github_token)
+                    if copilot_result:
+                        self._copilot_token = copilot_result["token"]
+                        self._copilot_token_expires_at = copilot_result.get("expires_at")
+                        self._copilot_base_url = copilot_result.get("base_url", DEFAULT_COPILOT_API_BASE_URL)
+                        logger.success("Copilot token refreshed successfully")
+                        return True
+                    else:
+                        logger.error("Failed to refresh Copilot token")
+                        return False
+        
+        return True
+    
     async def _get_copilot_token(self, github_token: str) -> Optional[Dict[str, Any]]:
         """
         Exchange GitHub token for Copilot API token.
@@ -752,6 +790,13 @@ class CopilotLLM:
         
         if not self._initialized:
             await self.initialize()
+        
+        # Ensure token is still valid (auto-refresh if needed)
+        if not await self._ensure_token_valid():
+            logger.warning("Copilot token invalid - attempting full re-initialization")
+            self._initialized = False
+            if not await self.initialize():
+                return AIMessage(content="Error: GitHub Copilot token expired. Please run 'uv run python -m intelclaw onboard' to re-authenticate.")
         
         # Convert input to messages format
         messages = []

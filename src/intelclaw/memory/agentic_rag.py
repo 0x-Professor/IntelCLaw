@@ -591,7 +591,9 @@ class AgenticRAG:
                     })
                     
         except Exception as e:
-            logger.warning(f"Semantic search failed: {e}")
+            # Only log as debug - semantic search is a backup, not critical
+            # Common causes: onnxruntime not installed, empty collection
+            logger.debug(f"Semantic search unavailable: {e}")
         
         return results
     

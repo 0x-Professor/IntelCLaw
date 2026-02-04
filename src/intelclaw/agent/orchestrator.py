@@ -157,6 +157,36 @@ class AgentOrchestrator(BaseAgent):
         
         logger.info("AgentOrchestrator shutdown complete")
     
+    async def _try_reinitialize_llm(self) -> bool:
+        """
+        Try to reinitialize the LLM connection.
+        
+        This is useful when the Copilot token has expired and been refreshed.
+        """
+        try:
+            logger.info("Attempting to reinitialize LLM connection...")
+            
+            model_config = self.config.get("models", {})
+            llm_config = self.config.get("llm", {})
+            
+            self._llm_provider = LLMProvider({
+                "model": model_config.get("primary", self.MODEL_NAME),
+                "temperature": 0.1,
+                "provider": llm_config.get("provider", "auto"),
+            })
+            
+            if await self._llm_provider.initialize():
+                self._llm = self._llm_provider.llm
+                logger.success(f"LLM reinitialized: {self._llm_provider.active_provider}")
+                return True
+            else:
+                logger.warning("LLM reinitialization failed")
+                return False
+                
+        except Exception as e:
+            logger.error(f"LLM reinitialization error: {e}")
+            return False
+    
     def clear_conversation_history(self) -> None:
         """Clear conversation history. Useful when switching models."""
         self._conversation_history = []
@@ -213,6 +243,21 @@ class AgentOrchestrator(BaseAgent):
         whether to use tools or provide a direct response.
         """
         self.status = AgentStatus.THINKING
+        
+        # Check if LLM is initialized
+        if self._llm is None:
+            # Try to re-initialize (token may have been refreshed)
+            await self._try_reinitialize_llm()
+            
+            if self._llm is None:
+                logger.error("LLM not available - GitHub Copilot subscription may be expired or unavailable")
+                from langchain_core.messages import AIMessage
+                return {
+                    **state,
+                    "messages": list(state["messages"]) + [AIMessage(content="I apologize, but I'm unable to process your request. The GitHub Copilot connection is not available. Please run 'uv run python -m intelclaw onboard' to refresh your authentication.")],
+                    "thoughts": list(state["thoughts"]) + [{"step": state["iteration"], "type": "error", "content": "LLM not initialized", "timestamp": datetime.now().isoformat()}],
+                    "iteration": state["iteration"] + 1,
+                }
         
         # Build prompt with tools
         system_prompt = self._get_system_prompt(state["context"])
