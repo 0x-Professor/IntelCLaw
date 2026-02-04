@@ -502,7 +502,9 @@ class CopilotLLM:
             response = await self._call_github_models_api(messages, include_tools=True)
             
             # Build AIMessage with tool_calls if present
-            ai_message = AIMessage(content=response.get("content", ""))
+            # Note: content can be None when model requests tool calls
+            content = response.get("content") or ""
+            ai_message = AIMessage(content=content)
             
             if response.get("tool_calls"):
                 # Set tool_calls attribute for LangGraph compatibility
@@ -712,8 +714,12 @@ class CopilotLLM:
             try:
                 # Get tool schema
                 if hasattr(tool, 'args_schema') and tool.args_schema:
-                    # Pydantic schema
-                    schema = tool.args_schema.schema()
+                    # Use model_json_schema for Pydantic v2
+                    if hasattr(tool.args_schema, 'model_json_schema'):
+                        schema = tool.args_schema.model_json_schema()
+                    else:
+                        # Fallback for older Pydantic
+                        schema = tool.args_schema.schema()
                     properties = schema.get("properties", {})
                     required = schema.get("required", [])
                 else:

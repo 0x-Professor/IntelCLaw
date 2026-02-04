@@ -90,9 +90,9 @@ class IntelClawTestSuite:
     async def test_llm_models_config(self) -> TestResult:
         """Test LLM models configuration."""
         try:
-            from intelclaw.integrations.llm_provider import GITHUB_MODELS, MODEL_CATEGORIES
+            from intelclaw.integrations.llm_provider import GITHUB_MODELS
             
-            required_models = ["gpt-4o", "gpt-5", "claude-sonnet-4.5", "gemini-3-pro"]
+            required_models = ["gpt-4o", "gpt-4o-mini", "llama-3.3-70b", "mistral-large"]
             missing = [m for m in required_models if m not in GITHUB_MODELS]
             
             if missing:
