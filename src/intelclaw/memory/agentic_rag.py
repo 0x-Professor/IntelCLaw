@@ -342,10 +342,12 @@ class AgenticRAG:
         
         try:
             if self._mem0_is_platform:
-                # Platform API: add(messages, user_id, metadata)
+                # Platform API: add(messages, user_id=..., metadata=...)
+                # Messages should be a list of dicts with role/content, or a string
+                messages = [{"role": "user", "content": content}]
                 await asyncio.to_thread(
                     self._mem0.add,
-                    content,
+                    messages,
                     user_id=self.user_id,
                     metadata=metadata or {}
                 )
@@ -367,25 +369,25 @@ class AgenticRAG:
         
         try:
             if self._mem0_is_platform:
-                # Platform API returns list directly
+                # Platform API: search(query, filters={"user_id": ...}, limit=...)
                 results = await asyncio.to_thread(
                     self._mem0.search,
                     query,
-                    user_id=self.user_id,
+                    filters={"user_id": self.user_id},
                     limit=limit
                 )
-                # Platform API returns list of memory objects
-                if isinstance(results, list):
-                    return [
-                        {
-                            "id": r.get("id", str(uuid4())),
-                            "content": r.get("memory", ""),
-                            "score": r.get("score", 0.5),
-                            "source": "mem0",
-                            "metadata": r.get("metadata", {})
-                        }
-                        for r in results
-                    ]
+                # Platform API returns dict with "results" key
+                results_list = results.get("results", []) if isinstance(results, dict) else results
+                return [
+                    {
+                        "id": r.get("id", str(uuid4())),
+                        "content": r.get("memory", ""),
+                        "score": r.get("score", 0.5),
+                        "source": "mem0",
+                        "metadata": r.get("metadata", {})
+                    }
+                    for r in results_list
+                ]
             else:
                 # Local API returns dict with 'results' key
                 results = await asyncio.to_thread(
