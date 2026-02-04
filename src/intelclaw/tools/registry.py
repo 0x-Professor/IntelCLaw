@@ -184,6 +184,38 @@ class ToolRegistry:
             
             executor = await make_executor()
             
+            # Build args_schema from definition parameters
+            args_schema = None
+            if definition.parameters and "properties" in definition.parameters:
+                from pydantic import create_model, Field
+                from typing import Optional
+                
+                fields = {}
+                props = definition.parameters.get("properties", {})
+                required = definition.parameters.get("required", [])
+                
+                for prop_name, prop_info in props.items():
+                    prop_type = str  # Default to string
+                    if prop_info.get("type") == "integer":
+                        prop_type = int
+                    elif prop_info.get("type") == "boolean":
+                        prop_type = bool
+                    elif prop_info.get("type") == "number":
+                        prop_type = float
+                    
+                    default_val = prop_info.get("default", ...)
+                    if prop_name not in required and default_val is ...:
+                        default_val = None
+                        prop_type = Optional[prop_type]
+                    
+                    fields[prop_name] = (prop_type, Field(
+                        default=default_val,
+                        description=prop_info.get("description", "")
+                    ))
+                
+                if fields:
+                    args_schema = create_model(f"{definition.name}Args", **fields)
+            
             # Use StructuredTool for proper async support
             from langchain_core.tools import StructuredTool
             
@@ -192,6 +224,7 @@ class ToolRegistry:
                 coroutine=executor,
                 name=definition.name,
                 description=definition.description,
+                args_schema=args_schema,
             )
             
             langchain_tools.append(lc_tool)

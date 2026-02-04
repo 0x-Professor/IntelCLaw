@@ -345,6 +345,13 @@ class AgentOrchestrator(BaseAgent):
         if not self.tools:
             return f"Error: Tool registry not available"
         
+        # Ensure tool_args is a dict, not None
+        if tool_args is None:
+            tool_args = {}
+        
+        # Log the tool call for debugging
+        logger.debug(f"Executing tool '{tool_name}' with args: {tool_args}")
+        
         try:
             result = await self.tools.execute(tool_name, tool_args)
             
@@ -357,8 +364,20 @@ class AgentOrchestrator(BaseAgent):
             
             return str(result)
         except Exception as e:
-            logger.error(f"Tool execution error: {e}")
-            return f"Error executing {tool_name}: {str(e)}"
+            error_msg = str(e)
+            logger.error(f"Tool execution error for '{tool_name}': {error_msg}")
+            
+            # Provide helpful error message for missing parameters
+            if "Missing required parameter" in error_msg:
+                tool_def = self.tools.get_definition(tool_name)
+                if tool_def and tool_def.parameters:
+                    required = tool_def.parameters.get("required", [])
+                    props = tool_def.parameters.get("properties", {})
+                    hint = f"Required parameters: {required}. "
+                    hint += f"Got: {list(tool_args.keys())}"
+                    return f"Error: {error_msg}. {hint}"
+            
+            return f"Error executing {tool_name}: {error_msg}"
     
     def _load_persona_files(self) -> Dict[str, str]:
         """
