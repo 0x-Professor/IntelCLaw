@@ -12,12 +12,16 @@
 
 - **🤖 REACT Agent Architecture**: Multi-agent system using LangChain/LangGraph with ReAct (Reasoning + Acting) pattern
 - **👁️ Screen Understanding**: Real-time screen capture, OCR, and UI element recognition
-- **🧠 Persistent Memory**: Multi-tier memory system with conversation history and long-term knowledge
+- **🧠 Persistent Memory**: Multi-tier memory with Mem0 cloud integration and ChromaDB vector store
 - **🎯 Task Automation**: Execute complex multi-step workflows autonomously
-- **🔍 Intelligent Search**: Web search, file search, and semantic retrieval
+- **🔍 Intelligent Search**: Web search (Tavily), file search, and semantic RAG retrieval
+- **📁 File Operations**: Read, write, search files with smart encoding detection and backup support
+- **💻 PowerShell Integration**: Native PowerShell execution with system info tools for Windows
 - **🖥️ Transparent Overlay**: Always-available chat interface with global hotkey (Ctrl+Shift+Space)
+- **🌐 Web Gateway**: Real-time chat via WebSocket at `localhost:8765`
 - **🔒 Privacy First**: Configurable privacy filters and secure credential storage
 - **🔧 Extensible Tools**: MCP (Model Context Protocol) support for unlimited extensibility
+- **🎭 Customizable Persona**: Edit `persona/SOUL.md` for personality and `persona/USER.md` for preferences
 
 ---
 
@@ -42,7 +46,7 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ### 2. Clone the Repository
 
 ```powershell
-git clone https://github.com/yourusername/IntelCLaw.git
+git clone https://github.com/0x-Professor/IntelCLaw.git
 cd IntelCLaw
 ```
 
@@ -162,7 +166,31 @@ IntelCLaw
 
 ---
 
-## 📁 Project Structure
+## � Built-in Tools
+
+IntelCLaw comes with a comprehensive set of built-in tools:
+
+| Tool | Description |
+|------|-------------|
+| `file_read` | Read files with smart encoding detection (UTF-8, Latin-1, binary fallback) |
+| `file_write` | Create/edit files with append mode and automatic backup (.bak) |
+| `file_search` | Search for files by name pattern with recursive glob |
+| `list_directory` | List directory contents with file sizes and types |
+| `get_current_directory` | Get current working directory with metadata |
+| `shell_command` | Execute shell commands (PowerShell on Windows) |
+| `powershell` | Execute PowerShell scripts directly |
+| `system_info` | Get drives, memory, OS info, and environment variables |
+| `execute_code` | Run Python code in isolated subprocess |
+| `pip_install` | Install Python packages via pip |
+| `web_scrape` | Fetch and parse web page content |
+| `tavily_search` | AI-powered web search via Tavily API |
+| `screenshot` | Capture screen or window |
+| `clipboard` | Read/write system clipboard |
+| `launch_app` | Launch applications |
+
+---
+
+## �📁 Project Structure
 
 ```
 IntelCLaw/
@@ -197,13 +225,14 @@ IntelCLaw/
 │   │   └── manager.py
 │   └── security/           # Security & auth
 │       └── manager.py
-├── persona/                # Agent personality files
-│   ├── AGENT.md
-│   ├── SOUL.md
-│   ├── MEMORY.md
-│   ├── TOOLS.md
-│   ├── SKILLS.md
-│   └── CONTACTS.md
+├── persona/                # Agent personality & user preferences
+│   ├── AGENT.md            # Agent behavior rules
+│   ├── SOUL.md             # Personality, traits, communication style
+│   ├── USER.md             # User preferences (coding style, paths, etc.)
+│   ├── MEMORY.md           # Memory guidelines
+│   ├── TOOLS.md            # Tool usage patterns
+│   ├── SKILLS.md           # Learned skills
+│   └── CONTACTS.md         # Known contacts
 ├── main.py                 # Entry point
 ├── config.yaml             # Configuration
 ├── pyproject.toml          # Dependencies
@@ -235,6 +264,48 @@ privacy:
 hotkeys:
   summon: ctrl+shift+space
   quick_action: ctrl+shift+q
+```
+
+---
+
+## 🌐 Web Gateway
+
+IntelCLaw includes a WebSocket-based chat interface:
+
+```powershell
+# Start with web gateway enabled
+uv run python main.py
+```
+
+Open `http://localhost:8765` in your browser for the web chat interface.
+
+### WebSocket API
+
+Connect to `ws://localhost:8765/ws` for real-time messaging:
+
+```javascript
+const ws = new WebSocket('ws://localhost:8765/ws');
+ws.send(JSON.stringify({ type: 'message', content: 'Hello IntelCLaw!' }));
+```
+
+---
+
+## 🎭 Persona System
+
+Customize IntelCLaw's personality and behavior:
+
+### SOUL.md - Agent Personality
+Defines personality traits, communication style, and behavioral guidelines.
+
+### USER.md - Your Preferences  
+Store your coding preferences, project paths, and workflow settings. IntelCLaw will adapt to your style.
+
+```markdown
+# Example USER.md entries
+**Primary Language**: Python
+**Indentation**: 4 spaces
+**Type Hints**: yes
+**Projects Folder**: C:\Projects
 ```
 
 ---
