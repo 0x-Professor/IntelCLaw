@@ -226,22 +226,10 @@ class WebServer:
                     {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "github-copilot", "category": "Google (Copilot)"},
                 ])
             
-            # Add GitHub Models API (FREE tier) as fallback options
-            if github_token or not model_list:
-                model_list.extend([
-                    {"id": "gpt-4o-mini", "name": "GPT-4o mini (Free)", "provider": "github-models", "category": "OpenAI (Free)"},
-                    {"id": "gpt-4o", "name": "GPT-4o (Free)", "provider": "github-models", "category": "OpenAI (Free)"},
-                    {"id": "llama-3.3-70b", "name": "Llama 3.3 70B", "provider": "github-models", "category": "Meta Llama (Free)"},
-                    {"id": "llama-3.1-405b", "name": "Llama 3.1 405B", "provider": "github-models", "category": "Meta Llama (Free)"},
-                    {"id": "mistral-large", "name": "Mistral Large", "provider": "github-models", "category": "Mistral (Free)"},
-                    {"id": "deepseek-r1", "name": "DeepSeek R1", "provider": "github-models", "category": "DeepSeek (Free)"},
-                    {"id": "deepseek-v3", "name": "DeepSeek V3", "provider": "github-models", "category": "DeepSeek (Free)"},
-                ])
-            
             return {
                 "models": model_list,
                 "current": self.current_model,
-                "provider": provider,
+                "provider": "github-copilot",
                 "has_copilot": has_copilot,
                 "dynamic": copilot_models_fetched
             }

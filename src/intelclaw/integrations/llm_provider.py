@@ -813,18 +813,8 @@ class CopilotLLM:
             return ai_message
             
         except Exception as e:
-            logger.error(f"Primary LLM error: {e}")
-            
-            # Try Anthropic fallback on failure
-            if self._use_anthropic_for_heavy and self._anthropic_fallback:
-                try:
-                    logger.info("Falling back to Anthropic Claude")
-                    response = await self._call_anthropic_api(messages)
-                    return AIMessage(content=response)
-                except Exception as fallback_error:
-                    logger.error(f"Anthropic fallback also failed: {fallback_error}")
-            
-            return AIMessage(content=f"Error calling LLM API: {e}")
+            logger.error(f"Copilot API error: {e}")
+            return AIMessage(content=f"Error calling GitHub Copilot API: {e}")
     
     def _detect_heavy_task(self, messages: List[Dict[str, str]]) -> bool:
         """Detect if messages indicate a heavy/complex task."""
