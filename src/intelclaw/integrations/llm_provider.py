@@ -1,12 +1,11 @@
 """
 GitHub Copilot LLM Provider - Use Copilot as the LLM backend.
 
-This module enables IntelCLaw to use GitHub Copilot's language models
-directly through VS Code's Copilot extension API.
+This module enables IntelCLaw to use GitHub's AI models
+through the GitHub Models API (https://models.github.ai).
 
-Key insight from OpenClaw: GitHub OAuth tokens must be EXCHANGED for
-Copilot API tokens at https://api.github.com/copilot_internal/v2/token
-before they can be used with the Copilot chat API.
+This works with any GitHub account and uses the free GitHub Models API,
+which provides access to models like GPT-4, GPT-4o, Claude, Llama, and more.
 """
 
 import asyncio
@@ -25,57 +24,56 @@ from loguru import logger
 # GitHub OAuth App Client ID for Copilot (same as VS Code uses)
 GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 
-# Copilot API Token Exchange URL (the key discovery from OpenClaw!)
-COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token"
+# GitHub Models API endpoint (free, works with any GitHub token)
+GITHUB_MODELS_API_URL = "https://models.github.ai/inference/chat/completions"
 
-# Default Copilot API Base URL
-DEFAULT_COPILOT_API_BASE_URL = "https://api.individual.githubcopilot.com"
+# Model ID mappings for GitHub Models
+# See: https://github.com/marketplace/models
+GITHUB_MODELS = {
+    # OpenAI Models
+    "gpt-4o": "openai/gpt-4o",
+    "gpt-4o-mini": "openai/gpt-4o-mini",
+    "gpt-4.1": "openai/gpt-4.1",
+    "gpt-4.1-mini": "openai/gpt-4.1-mini",
+    "gpt-4.1-nano": "openai/gpt-4.1-nano",
+    "o1": "openai/o1",
+    "o1-mini": "openai/o1-mini",
+    "o3-mini": "openai/o3-mini",
+    # Anthropic/Claude (through GitHub)
+    "claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
+    "claude-3-opus": "anthropic/claude-3-opus",
+    "claude-3-sonnet": "anthropic/claude-3-sonnet",
+    "claude-3-haiku": "anthropic/claude-3-haiku",
+    # Meta Llama
+    "llama-3.3-70b": "meta/llama-3.3-70b",
+    "llama-3.2-90b": "meta/llama-3.2-90b",
+    # DeepSeek
+    "deepseek-r1": "deepseek/deepseek-r1",
+    "deepseek-v3": "deepseek/deepseek-v3",
+}
 
 
-def derive_copilot_base_url_from_token(token: str) -> Optional[str]:
-    """
-    Extract the API base URL from a Copilot token.
-    
-    The Copilot token contains a proxy-ep field that determines
-    the correct API endpoint to use.
-    
-    Example: token;proxy-ep=proxy.individual.githubcopilot.com; 
-             -> https://api.individual.githubcopilot.com
-    """
-    trimmed = token.strip()
-    if not trimmed:
-        return None
-    
-    # The token is semicolon-delimited with key=value pairs
-    match = re.search(r'(?:^|;)\s*proxy-ep=([^;\s]+)', trimmed, re.IGNORECASE)
-    if not match:
-        return None
-    
-    proxy_ep = match.group(1).strip()
-    if not proxy_ep:
-        return None
-    
-    # Convert proxy.* to api.* (as OpenClaw does)
-    host = re.sub(r'^https?://', '', proxy_ep)
-    host = re.sub(r'^proxy\.', 'api.', host, flags=re.IGNORECASE)
-    
-    return f"https://{host}" if host else None
+def get_github_model_id(model: str) -> str:
+    """Convert a short model name to GitHub Models format."""
+    # If already in provider/model format, return as-is
+    if "/" in model:
+        return model
+    # Look up in mapping
+    return GITHUB_MODELS.get(model, f"openai/{model}")
 
 
 class GitHubAuth:
     """
     GitHub OAuth Device Flow Authentication.
     
-    This allows users to authenticate with GitHub to use Copilot
+    This allows users to authenticate with GitHub to use GitHub Models API
     without needing to manually copy tokens.
     
-    Token flow (based on OpenClaw):
-    1. GitHub Device Flow -> GitHub OAuth token (read:user scope)
-    2. Exchange at /copilot_internal/v2/token -> Copilot API token
+    The GitHub Models API works with any GitHub account and uses regular
+    GitHub OAuth tokens (no special Copilot subscription required for basic usage).
     """
     
     TOKEN_FILE = Path.home() / ".intelclaw" / "github_token.json"
-    COPILOT_TOKEN_FILE = Path.home() / ".intelclaw" / "copilot_token.json"
     
     @classmethod
     async def authenticate(cls) -> Optional[str]:
@@ -228,140 +226,36 @@ class GitHubAuth:
         """Clear saved token."""
         if cls.TOKEN_FILE.exists():
             cls.TOKEN_FILE.unlink()
-        if cls.COPILOT_TOKEN_FILE.exists():
-            cls.COPILOT_TOKEN_FILE.unlink()
-        print("✅ GitHub and Copilot tokens cleared.")
-    
-    @classmethod
-    async def exchange_for_copilot_token(cls, github_token: str) -> Optional[Dict[str, Any]]:
-        """
-        Exchange a GitHub OAuth token for a Copilot API token.
-        
-        This is the key step that makes Copilot API work!
-        Based on OpenClaw's implementation.
-        
-        Args:
-            github_token: GitHub OAuth access token
-            
-        Returns:
-            Dict with 'token', 'expires_at', 'base_url' if successful
-        """
-        import aiohttp
-        
-        # Check for cached Copilot token first
-        cached = cls._load_copilot_token()
-        if cached:
-            # Check if token is still valid (with 5 min buffer)
-            expires_at = cached.get("expires_at", 0)
-            if expires_at - time.time() > 300:  # 5 minutes buffer
-                logger.debug("Using cached Copilot API token")
-                return cached
-        
-        logger.info("Exchanging GitHub token for Copilot API token...")
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    COPILOT_TOKEN_URL,
-                    headers={
-                        "Accept": "application/json",
-                        "Authorization": f"Bearer {github_token}",
-                    }
-                ) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"Copilot token exchange failed: {response.status} - {error_text}")
-                        return None
-                    
-                    data = await response.json()
-                    
-                    # Parse response
-                    token = data.get("token")
-                    expires_at = data.get("expires_at")
-                    
-                    if not token:
-                        logger.error("Copilot token response missing 'token' field")
-                        return None
-                    
-                    # Convert expires_at to timestamp (GitHub returns Unix seconds)
-                    if isinstance(expires_at, (int, float)):
-                        # Handle both seconds and milliseconds
-                        if expires_at > 10_000_000_000:
-                            expires_at_ts = expires_at / 1000
-                        else:
-                            expires_at_ts = expires_at
-                    else:
-                        # Default to 1 hour from now
-                        expires_at_ts = time.time() + 3600
-                    
-                    # Derive the API base URL from the token
-                    base_url = derive_copilot_base_url_from_token(token) or DEFAULT_COPILOT_API_BASE_URL
-                    
-                    result = {
-                        "token": token,
-                        "expires_at": expires_at_ts,
-                        "base_url": base_url,
-                        "updated_at": time.time()
-                    }
-                    
-                    # Cache the token
-                    cls._save_copilot_token(result)
-                    
-                    logger.info(f"Copilot token obtained, expires at {time.ctime(expires_at_ts)}")
-                    logger.info(f"API base URL: {base_url}")
-                    
-                    return result
-                    
-        except Exception as e:
-            logger.error(f"Copilot token exchange error: {e}")
-            return None
-    
-    @classmethod
-    def _save_copilot_token(cls, token_data: Dict[str, Any]) -> None:
-        """Save Copilot token to file."""
-        cls.COPILOT_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        cls.COPILOT_TOKEN_FILE.write_text(json.dumps(token_data), encoding="utf-8")
-        try:
-            os.chmod(cls.COPILOT_TOKEN_FILE, 0o600)
-        except:
-            pass
-    
-    @classmethod
-    def _load_copilot_token(cls) -> Optional[Dict[str, Any]]:
-        """Load Copilot token from file."""
-        if cls.COPILOT_TOKEN_FILE.exists():
-            try:
-                return json.loads(cls.COPILOT_TOKEN_FILE.read_text(encoding="utf-8"))
-            except Exception as e:
-                logger.debug(f"Could not load cached Copilot token: {e}")
-        return None
+        print("✅ GitHub token cleared.")
 
 
 class CopilotLLM:
     """
-    LLM provider that uses GitHub Copilot.
+    LLM provider that uses GitHub Models API.
     
-    This allows IntelCLaw to leverage your existing GitHub Copilot
-    subscription without needing separate API keys.
+    This allows IntelCLaw to leverage GitHub's free AI models API
+    (https://models.github.ai) which provides access to:
+    - OpenAI models (GPT-4o, GPT-4.1, o1, o3)
+    - Anthropic models (Claude 3.5 Sonnet, Claude 3 Opus)
+    - Meta Llama models
+    - DeepSeek models
+    - And more!
     
-    Uses the two-step token flow:
-    1. GitHub OAuth token (from device flow)
-    2. Copilot API token (exchanged at /copilot_internal/v2/token)
+    Works with any GitHub account - no Copilot subscription required
+    for basic usage (rate limits apply).
     """
     
     def __init__(self, model: str = "gpt-4o"):
         """
-        Initialize Copilot LLM.
+        Initialize GitHub Models LLM.
         
         Args:
-            model: Model to use (gpt-4o, gpt-4o-mini, claude-3.5-sonnet, o1-preview)
+            model: Model to use (gpt-4o, gpt-4o-mini, claude-3.5-sonnet, llama-3.3-70b, etc.)
         """
         self.model = model
+        self._github_model_id = get_github_model_id(model)
         self._initialized = False
         self._github_token: Optional[str] = None
-        self._copilot_token: Optional[str] = None
-        self._copilot_base_url: str = DEFAULT_COPILOT_API_BASE_URL
-        self._token_expires_at: float = 0
         self._session_id: Optional[str] = None
     
     async def initialize(self) -> bool:
