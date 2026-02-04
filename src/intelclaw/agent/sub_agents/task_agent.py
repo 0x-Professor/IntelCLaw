@@ -8,7 +8,6 @@ import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from loguru import logger
 
 from intelclaw.agent.base import (
@@ -17,6 +16,7 @@ from intelclaw.agent.base import (
     AgentStatus,
     BaseAgent,
 )
+from intelclaw.integrations.llm_provider import LLMProvider
 
 if TYPE_CHECKING:
     from intelclaw.memory.manager import MemoryManager
@@ -54,7 +54,16 @@ class TaskAgent(BaseAgent):
             tools=tools,
         )
         
-        self._llm = ChatOpenAI(model="gpt-4o", temperature=0.2)
+        # LLM will be initialized asynchronously
+        self._llm_provider: Optional[LLMProvider] = None
+        self._llm = None
+    
+    async def _ensure_llm(self):
+        """Ensure LLM is initialized."""
+        if self._llm is None:
+            self._llm_provider = LLMProvider({"model": "gpt-4o", "temperature": 0.2})
+            await self._llm_provider.initialize()
+            self._llm = self._llm_provider.llm
     
     async def process(self, context: AgentContext) -> AgentResponse:
         """
