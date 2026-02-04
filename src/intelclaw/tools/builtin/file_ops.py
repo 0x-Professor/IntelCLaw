@@ -1,9 +1,10 @@
 """
-File Operations Tools - Read, write, and search files.
+File Operations Tools - Read, write, list, and search files.
 """
 
 import asyncio
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,7 +20,7 @@ class FileReadTool(BaseTool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="file_read",
-            description="Read the contents of a file. Supports text files.",
+            description="Read the contents of a file. Supports text files. Use this to read code, config files, logs, etc.",
             category=ToolCategory.SYSTEM,
             permissions=[ToolPermission.READ],
             parameters={
@@ -27,17 +28,20 @@ class FileReadTool(BaseTool):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file to read"
+                        "description": "Absolute or relative path to the file to read. Use forward slashes or escaped backslashes."
                     },
                     "encoding": {
                         "type": "string",
                         "description": "File encoding (default: utf-8)",
                         "default": "utf-8"
                     },
-                    "max_lines": {
+                    "start_line": {
                         "type": "integer",
-                        "description": "Maximum lines to read (default: all)",
-                        "default": None
+                        "description": "Start reading from this line (1-indexed, optional)"
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Stop reading at this line (1-indexed, optional)"
                     }
                 },
                 "required": ["path"]
@@ -49,15 +53,26 @@ class FileReadTool(BaseTool):
         self,
         path: str,
         encoding: str = "utf-8",
-        max_lines: Optional[int] = None,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
         **kwargs
     ) -> ToolResult:
         """Read file contents."""
         try:
+            # Handle various path formats
+            path = path.strip().strip('"').strip("'")
             file_path = Path(path).expanduser().resolve()
             
             if not file_path.exists():
-                return ToolResult(success=False, error=f"File not found: {path}")
+                # Try relative to current directory
+                alt_path = Path.cwd() / path
+                if alt_path.exists():
+                    file_path = alt_path
+                else:
+                    return ToolResult(
+                        success=False, 
+                        error=f"File not found: {path}. Tried: {file_path} and {alt_path}"
+                    )
             
             if not file_path.is_file():
                 return ToolResult(success=False, error=f"Not a file: {path}")
@@ -65,26 +80,46 @@ class FileReadTool(BaseTool):
             # Check file size
             size = file_path.stat().st_size
             if size > 10 * 1024 * 1024:  # 10MB limit
-                return ToolResult(success=False, error="File too large (>10MB)")
+                return ToolResult(
+                    success=False, 
+                    error=f"File too large ({size / 1024 / 1024:.1f}MB). Max 10MB."
+                )
             
-            content = await asyncio.to_thread(
-                file_path.read_text,
-                encoding=encoding
-            )
+            # Try multiple encodings
+            content = None
+            tried_encodings = [encoding, "utf-8", "utf-8-sig", "latin-1", "cp1252"]
+            for enc in tried_encodings:
+                try:
+                    content = await asyncio.to_thread(file_path.read_text, encoding=enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
             
-            if max_lines:
-                lines = content.split("\n")[:max_lines]
-                content = "\n".join(lines)
+            if content is None:
+                # Fall back to binary read
+                content = await asyncio.to_thread(file_path.read_bytes)
+                content = content.decode("utf-8", errors="replace")
+            
+            # Handle line ranges
+            if start_line or end_line:
+                lines = content.split("\n")
+                start_idx = (start_line - 1) if start_line else 0
+                end_idx = end_line if end_line else len(lines)
+                content = "\n".join(lines[start_idx:end_idx])
             
             return ToolResult(
                 success=True,
                 data=content,
-                metadata={"path": str(file_path), "size": size}
+                metadata={
+                    "path": str(file_path), 
+                    "size": size,
+                    "lines": content.count("\n") + 1
+                }
             )
             
         except Exception as e:
             logger.error(f"File read failed: {e}")
-            return ToolResult(success=False, error=str(e))
+            return ToolResult(success=False, error=f"Failed to read file: {str(e)}")
 
 
 class FileWriteTool(BaseTool):
