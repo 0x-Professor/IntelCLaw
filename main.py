@@ -50,7 +50,7 @@ async def main():
         from intelclaw.core.app import IntelCLawApp
         
         app = IntelCLawApp()
-        await app.start()
+        await app.startup()
         
     except KeyboardInterrupt:
         logger.info("Shutdown requested via keyboard")

@@ -53,3 +53,254 @@ Traceback (most recent call last):
           └ <intelclaw.core.app.IntelCLawApp object at 0x000002B19D18CD70>
 
 AttributeError: 'IntelCLawApp' object has no attribute 'start'. Did you mean: 'startup'?
+2026-02-04 18:04:07 | INFO     | __main__:main:45 - ==================================================
+2026-02-04 18:04:07 | INFO     | __main__:main:46 - IntelCLaw - Autonomous AI Agent
+2026-02-04 18:04:07 | INFO     | __main__:main:47 - ==================================================
+2026-02-04 18:04:09 | WARNING  | intelclaw.perception.ui_automation:<module>:20 - win32 modules not available
+2026-02-04 18:04:09 | INFO     | intelclaw.core.app:__init__:65 - IntelCLaw application instance created
+2026-02-04 18:04:09 | ERROR    | __main__:main:58 - Fatal error: 'IntelCLawApp' object has no attribute 'start'
+Traceback (most recent call last):
+
+  File "M:\IntelCLaw\main.py", line 114, in <module>
+    cli()
+    └ <function cli at 0x00000226A4B193A0>
+
+  File "M:\IntelCLaw\main.py", line 110, in cli
+    asyncio.run(main())
+    │       │   └ <function main at 0x00000226A44FE520>
+    │       └ <function run at 0x00000226A44042C0>
+    └ <module 'asyncio' from 'C:\\Program Files\\Python313\\Lib\\asyncio\\__init__.py'>
+
+  File "C:\Program Files\Python313\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           │      │   └ <coroutine object main at 0x00000226A4AC1FC0>
+           │      └ <function Runner.run at 0x00000226A44EEB60>
+           └ <asyncio.runners.Runner object at 0x00000226A4AEF620>
+  File "C:\Program Files\Python313\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           │    │     │                  └ <Task pending name='Task-1' coro=<main() running at M:\IntelCLaw\main.py:58> cb=[_run_until_complete_cb() at C:\Program Files...
+           │    │     └ <function BaseEventLoop.run_until_complete at 0x00000226A44EC720>
+           │    └ <ProactorEventLoop running=True closed=False debug=False>
+           └ <asyncio.runners.Runner object at 0x00000226A4AEF620>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+    self.run_forever()
+    │    └ <function BaseEventLoop.run_forever at 0x00000226A44EC680>
+    └ <ProactorEventLoop running=True closed=False debug=False>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+    self._run_once()
+    │    └ <function BaseEventLoop._run_once at 0x00000226A44EE480>
+    └ <ProactorEventLoop running=True closed=False debug=False>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 2040, in _run_once
+    handle._run()
+    │      └ <function Handle._run at 0x00000226A4405620>
+    └ <Handle <_asyncio.TaskStepMethWrapper object at 0x00000226A4AAB4F0>()>
+  File "C:\Program Files\Python313\Lib\asyncio\events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+    │    │            │    │           │    └ <member '_args' of 'Handle' objects>
+    │    │            │    │           └ <Handle <_asyncio.TaskStepMethWrapper object at 0x00000226A4AAB4F0>()>
+    │    │            │    └ <member '_callback' of 'Handle' objects>
+    │    │            └ <Handle <_asyncio.TaskStepMethWrapper object at 0x00000226A4AAB4F0>()>
+    │    └ <member '_context' of 'Handle' objects>
+    └ <Handle <_asyncio.TaskStepMethWrapper object at 0x00000226A4AAB4F0>()>
+
+> File "M:\IntelCLaw\main.py", line 53, in main
+    await app.start()
+          └ <intelclaw.core.app.IntelCLawApp object at 0x00000226C519BA10>
+
+AttributeError: 'IntelCLawApp' object has no attribute 'start'. Did you mean: 'startup'?
+2026-02-04 18:04:40 | INFO     | __main__:main:45 - ==================================================
+2026-02-04 18:04:40 | INFO     | __main__:main:46 - IntelCLaw - Autonomous AI Agent
+2026-02-04 18:04:40 | INFO     | __main__:main:47 - ==================================================
+2026-02-04 18:04:43 | WARNING  | intelclaw.perception.ui_automation:<module>:20 - win32 modules not available
+2026-02-04 18:04:44 | INFO     | intelclaw.core.app:__init__:65 - IntelCLaw application instance created
+2026-02-04 18:04:44 | INFO     | intelclaw.core.app:startup:69 - Starting IntelCLaw...
+2026-02-04 18:04:44 | INFO     | intelclaw.config.manager:load:124 - Configuration loaded from config.yaml
+2026-02-04 18:04:44 | INFO     | intelclaw.core.app:startup:74 - Configuration loaded
+2026-02-04 18:04:44 | INFO     | intelclaw.security.manager:initialize:55 - Initializing security manager...
+2026-02-04 18:04:44 | INFO     | intelclaw.security.manager:initialize:67 - Security manager initialized
+2026-02-04 18:04:44 | INFO     | intelclaw.core.app:startup:79 - Security manager initialized
+2026-02-04 18:04:44 | DEBUG    | intelclaw.memory.manager:__init__:68 - MemoryManager created
+2026-02-04 18:04:44 | INFO     | intelclaw.memory.manager:initialize:72 - Initializing memory system...
+2026-02-04 18:04:44 | INFO     | intelclaw.memory.working_memory:initialize:58 - Working memory initialized at data\working_memory.db
+2026-02-04 18:04:44 | WARNING  | intelclaw.memory.long_term:initialize:91 - Mem0 initialization failed: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable, using fallback
+2026-02-04 18:04:45 | INFO     | intelclaw.memory.vector_store:initialize:78 - Vector store initialized: intelclaw
+2026-02-04 18:04:45 | SUCCESS  | intelclaw.memory.manager:initialize:102 - Memory system initialized
+2026-02-04 18:04:45 | INFO     | intelclaw.core.app:startup:84 - Memory system initialized
+2026-02-04 18:04:45 | INFO     | intelclaw.memory.data_store:initialize:150 - DataStore initialized
+2026-02-04 18:04:45 | INFO     | intelclaw.core.app:startup:89 - Data store initialized
+2026-02-04 18:04:45 | DEBUG    | intelclaw.perception.manager:__init__:91 - PerceptionManager created
+2026-02-04 18:04:45 | INFO     | intelclaw.perception.manager:initialize:95 - Initializing perception layer...
+2026-02-04 18:04:45 | INFO     | intelclaw.perception.screen_capture:initialize:62 - Screen capture initialized with 1 monitors
+2026-02-04 18:04:45 | WARNING  | intelclaw.perception.ocr:initialize:55 - Tesseract not found: tesseract is not installed or it's not in your PATH. See README file for more information.. Install from https://github.com/tesseract-ocr/tesseract
+2026-02-04 18:04:45 | WARNING  | intelclaw.perception.ui_automation:initialize:50 - UI Automation not available (win32 not installed)
+2026-02-04 18:04:45 | INFO     | intelclaw.perception.activity_monitor:initialize:92 - Initializing activity monitor...
+2026-02-04 18:04:45 | DEBUG    | intelclaw.perception.activity_monitor:initialize:99 - Keyboard activity tracking enabled
+2026-02-04 18:04:45 | INFO     | intelclaw.perception.activity_monitor:initialize:104 - Activity monitor initialized
+2026-02-04 18:04:45 | SUCCESS  | intelclaw.perception.manager:initialize:130 - Perception layer initialized
+2026-02-04 18:04:45 | INFO     | intelclaw.core.app:startup:94 - Perception layer initialized
+2026-02-04 18:04:45 | DEBUG    | intelclaw.tools.registry:__init__:52 - ToolRegistry created
+2026-02-04 18:04:45 | INFO     | intelclaw.tools.registry:initialize:56 - Initializing tool registry...
+2026-02-04 18:04:45 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: tavily_search
+2026-02-04 18:04:45 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_read
+2026-02-04 18:04:45 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_write
+2026-02-04 18:04:45 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_search
+2026-02-04 18:04:45 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: screenshot
+2026-02-04 18:04:45 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: clipboard
+2026-02-04 18:04:45 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: launch_app
+2026-02-04 18:04:45 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: web_scrape
+2026-02-04 18:04:45 | DEBUG    | intelclaw.tools.registry:_load_mcp_tools:231 - MCP tool loading not yet implemented
+2026-02-04 18:04:45 | SUCCESS  | intelclaw.tools.registry:initialize:67 - Tool registry initialized with 8 tools
+2026-02-04 18:04:45 | INFO     | intelclaw.core.app:startup:99 - Tool registry initialized
+2026-02-04 18:04:45 | INFO     | intelclaw.integrations.copilot:initialize:63 - Copilot integration initialized (model: gpt-4o)
+2026-02-04 18:04:45 | INFO     | intelclaw.integrations.copilot:initialize:229 - Model manager initialized: {'primary': 'gpt-4o', 'fallback': 'gpt-4o-mini', 'coding': 'gpt-4o'}
+2026-02-04 18:04:45 | INFO     | intelclaw.core.app:startup:106 - Copilot integration initialized
+2026-02-04 18:04:45 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'IntelCLaw Orchestrator' initialized
+2026-02-04 18:04:45 | INFO     | intelclaw.agent.orchestrator:__init__:107 - AgentOrchestrator created
+2026-02-04 18:04:45 | INFO     | intelclaw.agent.orchestrator:initialize:111 - Initializing AgentOrchestrator...
+2026-02-04 18:04:45 | WARNING  | intelclaw.integrations.llm_provider:initialize:48 - Could not initialize Copilot LLM - token not found
+2026-02-04 18:04:45 | ERROR    | intelclaw.integrations.llm_provider:initialize:239 - No LLM provider available
+2026-02-04 18:04:45 | INFO     | intelclaw.agent.orchestrator:initialize:125 - Using LLM provider: none
+2026-02-04 18:04:45 | ERROR    | __main__:main:58 - Fatal error: tool() got an unexpected keyword argument 'name'
+Traceback (most recent call last):
+
+  File "M:\IntelCLaw\main.py", line 114, in <module>
+    cli()
+    └ <function cli at 0x00000235E8E593A0>
+
+  File "M:\IntelCLaw\main.py", line 110, in cli
+    asyncio.run(main())
+    │       │   └ <function main at 0x00000235E883E520>
+    │       └ <function run at 0x00000235E87402C0>
+    └ <module 'asyncio' from 'C:\\Program Files\\Python313\\Lib\\asyncio\\__init__.py'>
+
+  File "C:\Program Files\Python313\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           │      │   └ <coroutine object main at 0x00000235E8E01FC0>
+           │      └ <function Runner.run at 0x00000235E882EB60>
+           └ <asyncio.runners.Runner object at 0x00000235E8E2F620>
+  File "C:\Program Files\Python313\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           │    │     │                  └ <Task pending name='Task-1' coro=<main() running at M:\IntelCLaw\main.py:58> cb=[_run_until_complete_cb() at C:\Program Files...
+           │    │     └ <function BaseEventLoop.run_until_complete at 0x00000235E882C720>
+           │    └ <ProactorEventLoop running=True closed=False debug=False>
+           └ <asyncio.runners.Runner object at 0x00000235E8E2F620>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+    self.run_forever()
+    │    └ <function BaseEventLoop.run_forever at 0x00000235E882C680>
+    └ <ProactorEventLoop running=True closed=False debug=False>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+    self._run_once()
+    │    └ <function BaseEventLoop._run_once at 0x00000235E882E480>
+    └ <ProactorEventLoop running=True closed=False debug=False>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 2040, in _run_once
+    handle._run()
+    │      └ <function Handle._run at 0x00000235E8741620>
+    └ <Handle Task.task_wakeup()>
+  File "C:\Program Files\Python313\Lib\asyncio\events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+    │    │            │    │           │    └ <member '_args' of 'Handle' objects>
+    │    │            │    │           └ <Handle Task.task_wakeup()>
+    │    │            │    └ <member '_callback' of 'Handle' objects>
+    │    │            └ <Handle Task.task_wakeup()>
+    │    └ <member '_context' of 'Handle' objects>
+    └ <Handle Task.task_wakeup()>
+
+> File "M:\IntelCLaw\main.py", line 53, in main
+    await app.startup()
+          │   └ <function IntelCLawApp.startup at 0x0000023589626C00>
+          └ <intelclaw.core.app.IntelCLawApp object at 0x000002358957BA10>
+
+  File "M:\IntelCLaw\src\intelclaw\core\app.py", line 115, in startup
+    await self.agent.initialize()
+          │    │     └ <function AgentOrchestrator.initialize at 0x00000235EC1B8D60>
+          │    └ <intelclaw.agent.orchestrator.AgentOrchestrator object at 0x000002358A33C440>
+          └ <intelclaw.core.app.IntelCLawApp object at 0x000002358957BA10>
+
+  File "M:\IntelCLaw\src\intelclaw\agent\orchestrator.py", line 129, in initialize
+    self._langchain_tools = await self.tools.get_langchain_tools()
+    │    │                        │    │     └ <function ToolRegistry.get_langchain_tools at 0x0000023589626700>
+    │    │                        │    └ <intelclaw.tools.registry.ToolRegistry object at 0x0000023589F22660>
+    │    │                        └ <intelclaw.agent.orchestrator.AgentOrchestrator object at 0x000002358A33C440>
+    │    └ []
+    └ <intelclaw.agent.orchestrator.AgentOrchestrator object at 0x000002358A33C440>
+
+  File "M:\IntelCLaw\src\intelclaw\tools\registry.py", line 188, in get_langchain_tools
+    @tool(name=definition.name, description=definition.description)
+     │         │          │                 │          └ 'Search the web for current information using Tavily. Returns relevant web results with snippets.'
+     │         │          │                 └ ToolDefinition(name='tavily_search', description='Search the web for current information using Tavily. Returns relevant web r...
+     │         │          └ 'tavily_search'
+     │         └ ToolDefinition(name='tavily_search', description='Search the web for current information using Tavily. Returns relevant web r...
+     └ <function tool at 0x00000235EC18C540>
+
+TypeError: tool() got an unexpected keyword argument 'name'
+2026-02-04 18:05:11 | INFO     | __main__:main:45 - ==================================================
+2026-02-04 18:05:11 | INFO     | __main__:main:46 - IntelCLaw - Autonomous AI Agent
+2026-02-04 18:05:11 | INFO     | __main__:main:47 - ==================================================
+2026-02-04 18:05:14 | WARNING  | intelclaw.perception.ui_automation:<module>:20 - win32 modules not available
+2026-02-04 18:05:14 | INFO     | intelclaw.core.app:__init__:65 - IntelCLaw application instance created
+2026-02-04 18:05:14 | INFO     | intelclaw.core.app:startup:69 - Starting IntelCLaw...
+2026-02-04 18:05:14 | INFO     | intelclaw.config.manager:load:124 - Configuration loaded from config.yaml
+2026-02-04 18:05:14 | INFO     | intelclaw.core.app:startup:74 - Configuration loaded
+2026-02-04 18:05:14 | INFO     | intelclaw.security.manager:initialize:55 - Initializing security manager...
+2026-02-04 18:05:14 | INFO     | intelclaw.security.manager:initialize:67 - Security manager initialized
+2026-02-04 18:05:14 | INFO     | intelclaw.core.app:startup:79 - Security manager initialized
+2026-02-04 18:05:14 | DEBUG    | intelclaw.memory.manager:__init__:68 - MemoryManager created
+2026-02-04 18:05:14 | INFO     | intelclaw.memory.manager:initialize:72 - Initializing memory system...
+2026-02-04 18:05:14 | INFO     | intelclaw.memory.working_memory:initialize:58 - Working memory initialized at data\working_memory.db
+2026-02-04 18:05:15 | WARNING  | intelclaw.memory.long_term:initialize:91 - Mem0 initialization failed: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable, using fallback
+2026-02-04 18:05:15 | INFO     | intelclaw.memory.vector_store:initialize:78 - Vector store initialized: intelclaw
+2026-02-04 18:05:15 | SUCCESS  | intelclaw.memory.manager:initialize:102 - Memory system initialized
+2026-02-04 18:05:15 | INFO     | intelclaw.core.app:startup:84 - Memory system initialized
+2026-02-04 18:05:15 | INFO     | intelclaw.memory.data_store:initialize:150 - DataStore initialized
+2026-02-04 18:05:15 | INFO     | intelclaw.core.app:startup:89 - Data store initialized
+2026-02-04 18:05:15 | DEBUG    | intelclaw.perception.manager:__init__:91 - PerceptionManager created
+2026-02-04 18:05:15 | INFO     | intelclaw.perception.manager:initialize:95 - Initializing perception layer...
+2026-02-04 18:05:15 | INFO     | intelclaw.perception.screen_capture:initialize:62 - Screen capture initialized with 1 monitors
+2026-02-04 18:05:15 | WARNING  | intelclaw.perception.ocr:initialize:55 - Tesseract not found: tesseract is not installed or it's not in your PATH. See README file for more information.. Install from https://github.com/tesseract-ocr/tesseract
+2026-02-04 18:05:15 | WARNING  | intelclaw.perception.ui_automation:initialize:50 - UI Automation not available (win32 not installed)
+2026-02-04 18:05:15 | INFO     | intelclaw.perception.activity_monitor:initialize:92 - Initializing activity monitor...
+2026-02-04 18:05:15 | DEBUG    | intelclaw.perception.activity_monitor:initialize:99 - Keyboard activity tracking enabled
+2026-02-04 18:05:15 | INFO     | intelclaw.perception.activity_monitor:initialize:104 - Activity monitor initialized
+2026-02-04 18:05:15 | SUCCESS  | intelclaw.perception.manager:initialize:130 - Perception layer initialized
+2026-02-04 18:05:15 | INFO     | intelclaw.core.app:startup:94 - Perception layer initialized
+2026-02-04 18:05:15 | DEBUG    | intelclaw.tools.registry:__init__:52 - ToolRegistry created
+2026-02-04 18:05:15 | INFO     | intelclaw.tools.registry:initialize:56 - Initializing tool registry...
+2026-02-04 18:05:15 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: tavily_search
+2026-02-04 18:05:15 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_read
+2026-02-04 18:05:15 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_write
+2026-02-04 18:05:15 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_search
+2026-02-04 18:05:15 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: screenshot
+2026-02-04 18:05:15 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: clipboard
+2026-02-04 18:05:15 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: launch_app
+2026-02-04 18:05:15 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: web_scrape
+2026-02-04 18:05:15 | DEBUG    | intelclaw.tools.registry:_load_mcp_tools:226 - MCP tool loading not yet implemented
+2026-02-04 18:05:15 | SUCCESS  | intelclaw.tools.registry:initialize:67 - Tool registry initialized with 8 tools
+2026-02-04 18:05:15 | INFO     | intelclaw.core.app:startup:99 - Tool registry initialized
+2026-02-04 18:05:15 | INFO     | intelclaw.integrations.copilot:initialize:63 - Copilot integration initialized (model: gpt-4o)
+2026-02-04 18:05:15 | INFO     | intelclaw.integrations.copilot:initialize:229 - Model manager initialized: {'primary': 'gpt-4o', 'fallback': 'gpt-4o-mini', 'coding': 'gpt-4o'}
+2026-02-04 18:05:15 | INFO     | intelclaw.core.app:startup:106 - Copilot integration initialized
+2026-02-04 18:05:15 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'IntelCLaw Orchestrator' initialized
+2026-02-04 18:05:15 | INFO     | intelclaw.agent.orchestrator:__init__:107 - AgentOrchestrator created
+2026-02-04 18:05:15 | INFO     | intelclaw.agent.orchestrator:initialize:111 - Initializing AgentOrchestrator...
+2026-02-04 18:05:15 | WARNING  | intelclaw.integrations.llm_provider:initialize:48 - Could not initialize Copilot LLM - token not found
+2026-02-04 18:05:15 | ERROR    | intelclaw.integrations.llm_provider:initialize:239 - No LLM provider available
+2026-02-04 18:05:15 | INFO     | intelclaw.agent.orchestrator:initialize:125 - Using LLM provider: none
+2026-02-04 18:05:15 | DEBUG    | intelclaw.agent.orchestrator:_build_graph:193 - LangGraph REACT workflow built
+2026-02-04 18:05:15 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Research Agent' initialized
+2026-02-04 18:05:15 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Coding Agent' initialized
+2026-02-04 18:05:15 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Task Agent' initialized
+2026-02-04 18:05:15 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'System Agent' initialized
+2026-02-04 18:05:15 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: research
+2026-02-04 18:05:15 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: coding
+2026-02-04 18:05:15 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: task
+2026-02-04 18:05:15 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: system
+2026-02-04 18:05:15 | INFO     | intelclaw.agent.orchestrator:_initialize_sub_agents:404 - Initialized 4 sub-agents
+2026-02-04 18:05:15 | SUCCESS  | intelclaw.agent.orchestrator:initialize:138 - AgentOrchestrator initialized
+2026-02-04 18:05:15 | INFO     | intelclaw.core.app:startup:116 - Agent orchestrator initialized
+2026-02-04 18:05:15 | INFO     | intelclaw.agent.self_improvement:initialize:51 - Self-improvement module initialized
+2026-02-04 18:05:15 | INFO     | intelclaw.core.app:startup:121 - Self-improvement module initialized
+2026-02-04 18:05:15 | INFO     | intelclaw.ui.system_tray:_setup_tray:78 - System tray icon created
+2026-02-04 18:05:16 | INFO     | intelclaw.ui.overlay:_register_hotkey:81 - Global hotkey registered: ctrl+shift+space
+2026-02-04 18:05:16 | INFO     | intelclaw.ui.overlay:_setup_window:70 - Overlay window created
+2026-02-04 18:05:16 | INFO     | intelclaw.core.app:startup:126 - UI components initialized
+2026-02-04 18:05:16 | SUCCESS  | intelclaw.core.app:startup:129 - IntelCLaw started successfully!

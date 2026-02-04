@@ -7,7 +7,7 @@ Manages tool discovery, registration, and execution.
 import asyncio
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
-from langchain_core.tools import BaseTool as LangChainBaseTool, tool
+from langchain_core.tools import BaseTool as LangChainBaseTool
 from loguru import logger
 
 from intelclaw.tools.base import BaseTool, ToolDefinition, ToolResult, ToolCategory
@@ -184,12 +184,7 @@ class ToolRegistry:
             
             executor = await make_executor()
             
-            # Create LangChain tool using the @tool decorator pattern
-            @tool(name=definition.name, description=definition.description)
-            async def langchain_wrapper(**kwargs):
-                return await executor(**kwargs)
-            
-            # Actually, let's use StructuredTool for better control
+            # Use StructuredTool for proper async support
             from langchain_core.tools import StructuredTool
             
             lc_tool = StructuredTool.from_function(
