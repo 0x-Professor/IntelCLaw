@@ -4033,3 +4033,4 @@ content.list[union[str,dict[any,any]]]
 2026-02-05 03:59:07 | DEBUG    | intelclaw.integrations.llm_provider:fetch_copilot_models:175 - Fetched 39 models from Copilot API
 2026-02-05 03:59:07 | INFO     | intelclaw.web.server:models:204 - Fetched 39 Copilot models dynamically
 2026-02-05 03:59:07 | DEBUG    | intelclaw.agent.orchestrator:_should_continue:366 - REACT iteration: 2
+2026-02-05 04:00:04 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 1
