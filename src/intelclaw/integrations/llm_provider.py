@@ -249,6 +249,30 @@ class LLMProvider:
         """Get the current provider name."""
         return self._provider_name
     
+    @property
+    def active_provider(self) -> str:
+        """Get the active provider name."""
+        return self._provider_name
+    
+    @property
+    def available_providers(self) -> List[str]:
+        """List potentially available providers."""
+        providers = []
+        
+        # Check Copilot
+        if os.environ.get("GITHUB_COPILOT_TOKEN") or self._provider_name == "copilot":
+            providers.append("copilot")
+        
+        # Check OpenAI
+        if os.environ.get("OPENAI_API_KEY"):
+            providers.append("openai")
+        
+        # Check Anthropic
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            providers.append("anthropic")
+        
+        return providers if providers else ["copilot"]  # Default to copilot attempt
+    
     async def invoke(self, prompt: str, **kwargs) -> str:
         """Invoke the LLM."""
         if not self._llm:
