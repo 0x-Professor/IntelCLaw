@@ -11,6 +11,7 @@ Guides users through:
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -24,6 +25,84 @@ from .auth import AuthManager
 STATE_DIR = Path.home() / ".intelclaw"
 CONFIG_FILE = STATE_DIR / "intelclaw.json"
 WORKSPACE_DIR = STATE_DIR / "workspace"
+
+# Project .env file location
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
+
+
+def save_to_env(key: str, value: str, env_file: Path = ENV_FILE) -> bool:
+    """
+    Save a key-value pair to the .env file.
+    
+    If the key exists, update it. If not, append it.
+    
+    Args:
+        key: Environment variable name
+        value: Value to set
+        env_file: Path to .env file
+        
+    Returns:
+        True if successful
+    """
+    try:
+        content = ""
+        key_pattern = re.compile(rf'^{re.escape(key)}=.*$', re.MULTILINE)
+        
+        if env_file.exists():
+            content = env_file.read_text(encoding="utf-8")
+        
+        new_line = f"{key}={value}"
+        
+        if key_pattern.search(content):
+            # Update existing key
+            content = key_pattern.sub(new_line, content)
+            logger.debug(f"Updated {key} in .env")
+        else:
+            # Append new key
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += f"\n{new_line}\n"
+            logger.debug(f"Added {key} to .env")
+        
+        env_file.write_text(content, encoding="utf-8")
+        
+        # Also set in current environment
+        os.environ[key] = value
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save {key} to .env: {e}")
+        return False
+
+
+def load_from_env(key: str, env_file: Path = ENV_FILE) -> Optional[str]:
+    """
+    Load a value from the .env file.
+    
+    Args:
+        key: Environment variable name
+        env_file: Path to .env file
+        
+    Returns:
+        Value if found, None otherwise
+    """
+    # First check current environment
+    if key in os.environ:
+        return os.environ[key]
+    
+    # Then check .env file
+    if env_file.exists():
+        try:
+            content = env_file.read_text(encoding="utf-8")
+            pattern = re.compile(rf'^{re.escape(key)}=(.*)$', re.MULTILINE)
+            match = pattern.search(content)
+            if match:
+                return match.group(1).strip()
+        except Exception as e:
+            logger.debug(f"Failed to read {key} from .env: {e}")
+    
+    return None
 
 
 def print_banner():
@@ -168,29 +247,74 @@ async def run_onboard(
             choice = prompt_choice("", auth_choices, default=2)
             
             if choice == 1:
-                # GitHub Copilot
+                # GitHub Copilot - Device OAuth flow
                 print("\n🔐 Authenticating with GitHub Copilot...")
+                print("   This will open a browser for GitHub device authorization.")
+                print()
+                
                 profile = await auth_manager.login_github_copilot()
                 if profile:
+                    # Save the GitHub token to .env for reuse
+                    if profile.extra and profile.extra.get("github_token"):
+                        github_token = profile.extra["github_token"]
+                        save_to_env("COPILOT_GITHUB_TOKEN", github_token)
+                        print("\n✅ GitHub token saved to .env file")
+                    
+                    # Save Copilot base URL if available
+                    if profile.extra and profile.extra.get("copilot_base_url"):
+                        save_to_env("COPILOT_API_BASE_URL", profile.extra["copilot_base_url"])
+                    
                     config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
                         "primary": "github-copilot/gpt-4o"
                     }
+                    
+                    # Set default model in .env
+                    save_to_env("INTELCLAW_DEFAULT_MODEL", "gpt-4o")
+                    save_to_env("INTELCLAW_PROVIDER", "github-copilot")
             
             elif choice == 2:
-                # GitHub Models (FREE)
+                # GitHub Models (FREE) - Token-based
                 print("\n🔐 Authenticating with GitHub Models API...")
-                profile = await auth_manager.login_github_models()
-                if profile:
-                    config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
-                        "primary": "github-models/gpt-4o"
-                    }
+                
+                # Check if we already have a token
+                existing_token = load_from_env("GITHUB_TOKEN")
+                if existing_token:
+                    print(f"   Found existing GITHUB_TOKEN in .env")
+                    use_existing = prompt_yes_no("Use existing token?", default=True)
+                    if use_existing:
+                        print("\n✅ Using existing GitHub token from .env")
+                        config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
+                            "primary": "github-models/gpt-4o-mini"
+                        }
+                        save_to_env("INTELCLAW_DEFAULT_MODEL", "gpt-4o-mini")
+                        save_to_env("INTELCLAW_PROVIDER", "github-models")
+                    else:
+                        profile = await auth_manager.login_github_models()
+                        if profile and profile.access_token:
+                            save_to_env("GITHUB_TOKEN", profile.access_token)
+                            print("\n✅ GitHub token saved to .env file")
+                            config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
+                                "primary": "github-models/gpt-4o-mini"
+                            }
+                            save_to_env("INTELCLAW_DEFAULT_MODEL", "gpt-4o-mini")
+                            save_to_env("INTELCLAW_PROVIDER", "github-models")
+                else:
+                    profile = await auth_manager.login_github_models()
+                    if profile and profile.access_token:
+                        save_to_env("GITHUB_TOKEN", profile.access_token)
+                        print("\n✅ GitHub token saved to .env file")
+                        config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
+                            "primary": "github-models/gpt-4o-mini"
+                        }
+                        save_to_env("INTELCLAW_DEFAULT_MODEL", "gpt-4o-mini")
+                        save_to_env("INTELCLAW_PROVIDER", "github-models")
             
             elif choice == 3:
                 # OpenAI
                 print("\n🔑 OpenAI API Key")
-                api_key = os.environ.get("OPENAI_API_KEY")
+                api_key = load_from_env("OPENAI_API_KEY")
                 if api_key:
-                    print(f"   Found OPENAI_API_KEY in environment")
+                    print(f"   Found OPENAI_API_KEY in .env")
                     use_env = prompt_yes_no("Use this key?", default=True)
                     if not use_env:
                         api_key = prompt_string("Enter your OpenAI API key", required=True)
@@ -198,18 +322,21 @@ async def run_onboard(
                     api_key = prompt_string("Enter your OpenAI API key", required=True)
                 
                 if api_key:
+                    save_to_env("OPENAI_API_KEY", api_key)
                     auth_manager.save_api_key("openai", api_key)
                     config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
                         "primary": "openai/gpt-4o"
                     }
-                    print("\n✅ OpenAI API key saved!")
+                    save_to_env("INTELCLAW_DEFAULT_MODEL", "gpt-4o")
+                    save_to_env("INTELCLAW_PROVIDER", "openai")
+                    print("\n✅ OpenAI API key saved to .env file!")
             
             elif choice == 4:
                 # Anthropic
                 print("\n🔑 Anthropic API Key")
-                api_key = os.environ.get("ANTHROPIC_API_KEY")
+                api_key = load_from_env("ANTHROPIC_API_KEY")
                 if api_key:
-                    print(f"   Found ANTHROPIC_API_KEY in environment")
+                    print(f"   Found ANTHROPIC_API_KEY in .env")
                     use_env = prompt_yes_no("Use this key?", default=True)
                     if not use_env:
                         api_key = prompt_string("Enter your Anthropic API key", required=True)
@@ -217,11 +344,14 @@ async def run_onboard(
                     api_key = prompt_string("Enter your Anthropic API key", required=True)
                 
                 if api_key:
+                    save_to_env("ANTHROPIC_API_KEY", api_key)
                     auth_manager.save_api_key("anthropic", api_key)
                     config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
                         "primary": "anthropic/claude-3.5-sonnet"
                     }
-                    print("\n✅ Anthropic API key saved!")
+                    save_to_env("INTELCLAW_DEFAULT_MODEL", "claude-3.5-sonnet")
+                    save_to_env("INTELCLAW_PROVIDER", "anthropic")
+                    print("\n✅ Anthropic API key saved to .env file!")
             
             else:
                 print("\n⏭️  Skipping authentication. You can set it up later with:")
@@ -232,14 +362,17 @@ async def run_onboard(
             if auth_choice == "github-copilot":
                 profile = await auth_manager.login_github_copilot()
                 if profile:
+                    if profile.extra and profile.extra.get("github_token"):
+                        save_to_env("COPILOT_GITHUB_TOKEN", profile.extra["github_token"])
                     config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
                         "primary": "github-copilot/gpt-4o"
                     }
             elif auth_choice == "github-models":
                 profile = await auth_manager.login_github_models()
-                if profile:
+                if profile and profile.access_token:
+                    save_to_env("GITHUB_TOKEN", profile.access_token)
                     config.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
-                        "primary": "github-models/gpt-4o"
+                        "primary": "github-models/gpt-4o-mini"
                     }
     
     # Step 3: Workspace
