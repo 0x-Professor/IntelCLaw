@@ -396,14 +396,21 @@ class AuthManager:
             return None
     
     async def _exchange_for_copilot_token(self, github_token: str) -> Optional[Dict[str, Any]]:
-        """Exchange GitHub token for Copilot API token."""
+        """
+        Exchange GitHub token for Copilot API token.
+        
+        This is the key step based on OpenClaw's implementation.
+        We call GitHub's internal Copilot token endpoint to get an API token
+        that works with the Copilot API endpoints.
+        """
         async with aiohttp.ClientSession() as session:
             headers = {
-                "Authorization": f"token {github_token}",
+                "Authorization": f"Bearer {github_token}",
                 "Accept": "application/json",
-                "Editor-Version": "vscode/1.96.0",
-                "Editor-Plugin-Version": "copilot-chat/0.26.0",
-                "User-Agent": "GitHubCopilotChat/0.26.0",
+                "Editor-Version": "vscode/1.96.2",
+                "Editor-Plugin-Version": "copilot-chat/0.26.7",
+                "User-Agent": "GitHubCopilotChat/0.26.7",
+                "X-Github-Api-Version": "2025-04-01",
             }
             
             async with session.get(
@@ -412,10 +419,36 @@ class AuthManager:
             ) as response:
                 if response.status == 200:
                     data = await response.json()
+                    token = data.get("token")
+                    expires_at_str = data.get("expires_at")
+                    
+                    # Parse expires_at
+                    expires_at = None
+                    if expires_at_str:
+                        try:
+                            if isinstance(expires_at_str, (int, float)):
+                                expires_at = float(expires_at_str)
+                            else:
+                                from datetime import datetime
+                                dt = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                                expires_at = dt.timestamp()
+                        except:
+                            pass
+                    
+                    # Derive base URL from token (like OpenClaw)
+                    base_url = "https://api.individual.githubcopilot.com"
+                    if token and ";" in token:
+                        for part in token.split(";"):
+                            if part.startswith("proxy-ep="):
+                                proxy = part[9:].strip()
+                                if proxy:
+                                    base_url = f"https://{proxy.replace('proxy.', 'api.')}"
+                                    break
+                    
                     return {
-                        "token": data.get("token"),
-                        "expires_at": data.get("expires_at"),
-                        "base_url": data.get("endpoints", {}).get("api"),
+                        "token": token,
+                        "expires_at": expires_at,
+                        "base_url": base_url,
                     }
                 elif response.status == 401:
                     logger.warning("GitHub token not authorized for Copilot")

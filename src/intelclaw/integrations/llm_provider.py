@@ -32,9 +32,20 @@ load_dotenv()
 
 
 # GitHub OAuth App Client ID for Copilot (used for OAuth device flow)
+# Same as VS Code Copilot extension - used by OpenClaw
 GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 
-# GitHub Models API endpoint - uses Azure AI inference
+# GitHub Device Flow URLs
+DEVICE_CODE_URL = "https://github.com/login/device/code"
+ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
+
+# Copilot Token Exchange URL - exchanges GitHub token for Copilot API token
+COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token"
+
+# Default Copilot API Base URL (OpenClaw style)
+DEFAULT_COPILOT_API_BASE_URL = "https://api.individual.githubcopilot.com"
+
+# GitHub Models API endpoint - uses Azure AI inference (fallback)
 GITHUB_MODELS_API_URL = "https://models.inference.ai.azure.com/chat/completions"
 
 # =============================================================================
@@ -99,6 +110,18 @@ HEAVY_TASK_MODELS = ["gpt-4o", "llama-3.1-405b", "mistral-large"]
 # Coding-optimized models
 CODING_MODELS = ["gpt-4o", "deepseek-v3", "llama-3.3-70b"]
 
+# GitHub Copilot models (available via Copilot subscription)
+# Model availability depends on your subscription plan
+COPILOT_MODELS = [
+    "gpt-4o",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "o1",
+    "o1-mini",
+    "o3-mini",
+]
+
 
 def get_github_model_id(model: str) -> str:
     """Convert a short model name to GitHub Models format."""
@@ -107,6 +130,31 @@ def get_github_model_id(model: str) -> str:
         return model
     # Look up in mapping
     return GITHUB_MODELS.get(model, f"openai/{model}")
+
+
+def derive_copilot_base_url_from_token(token: str) -> Optional[str]:
+    """
+    Derive the Copilot API base URL from the token.
+    
+    OpenClaw extracts the base URL from tokens with format:
+    token;proxy-ep=proxy.example.com;
+    """
+    if not token or ";" not in token:
+        return None
+    
+    try:
+        # Parse token parts
+        parts = token.split(";")
+        for part in parts:
+            if part.startswith("proxy-ep="):
+                proxy = part[9:].strip()
+                if proxy:
+                    # Convert proxy endpoint to API URL
+                    return f"https://{proxy.replace('proxy.', 'api.')}"
+    except:
+        pass
+    
+    return None
 
 
 class GitHubAuth:
@@ -235,34 +283,50 @@ class GitHubAuth:
 
 class CopilotLLM:
     """
-    LLM provider that uses GitHub Models API.
+    LLM provider that uses GitHub Copilot API (like OpenClaw).
     
-    This allows IntelCLaw to leverage GitHub's free AI models API
-    (https://models.github.ai) which provides access to:
-    - OpenAI models (GPT-4o, GPT-4o-mini, GPT-4-turbo)
-    - Meta Llama models (Llama 3.3, 3.2, 3.1)
-    - Mistral models
-    - DeepSeek models
-    - Microsoft Phi models
-    - And more!
+    This provides two modes:
     
-    Works with any GitHub account - no Copilot subscription required
-    for basic usage (rate limits apply).
+    1. GitHub Copilot API (requires Copilot subscription):
+       - Uses device OAuth flow to get GitHub token
+       - Exchanges GitHub token for Copilot API token
+       - Accesses models via https://api.individual.githubcopilot.com
     
-    Default: gpt-4o-mini (fast, free tier friendly)
+    2. GitHub Models API (free fallback):
+       - Uses GitHub Personal Access Token
+       - Accesses models via Azure AI inference endpoint
+       - Rate limits apply but no subscription needed
+    
+    Authentication priority (like OpenClaw):
+    1. COPILOT_GITHUB_TOKEN environment variable
+    2. GH_TOKEN environment variable  
+    3. GITHUB_TOKEN environment variable
+    4. Saved auth profiles (github-copilot or github-models)
+    5. VS Code Copilot extension storage
+    6. GitHub CLI token
+    
+    Default model: gpt-4o (Copilot) or gpt-4o-mini (free tier)
     """
     
-    def __init__(self, model: str = None):
+    # Copilot token cache
+    COPILOT_TOKEN_CACHE = Path.home() / ".intelclaw" / "copilot_token.json"
+    
+    def __init__(self, model: str = None, use_copilot_api: bool = True):
         """
-        Initialize GitHub Models LLM.
+        Initialize GitHub Copilot/Models LLM.
         
         Args:
-            model: Model to use (gpt-4o-mini default, gpt-4o, llama-3.3-70b, etc.)
+            model: Model to use (gpt-4o default for Copilot, gpt-4o-mini for free)
+            use_copilot_api: If True, try Copilot API first; False uses GitHub Models API
         """
         self.model = model or DEFAULT_MODEL
         self._github_model_id = get_github_model_id(self.model)
         self._initialized = False
-        self._github_token: Optional[str] = None
+        self._github_token: Optional[str] = None  # GitHub OAuth token
+        self._copilot_token: Optional[str] = None  # Exchanged Copilot API token
+        self._copilot_token_expires_at: Optional[float] = None
+        self._copilot_base_url: str = DEFAULT_COPILOT_API_BASE_URL
+        self._use_copilot_api: bool = use_copilot_api
         self._session_id: Optional[str] = None
         self._anthropic_fallback = None  # Anthropic client for heavy tasks
         self._use_anthropic_for_heavy = False
@@ -273,21 +337,35 @@ class CopilotLLM:
         """
         Change the model at runtime.
         
+        For Copilot API, model names like 'gpt-4o' are used directly.
+        For GitHub Models API, model names are mapped to Azure AI format.
+        
         Args:
             model: New model to use (e.g., 'gpt-4o', 'llama-3.3-70b')
         """
-        if model in GITHUB_MODELS:
-            self.model = model
+        self.model = model
+        
+        # For Copilot API, use model name directly
+        if self._use_copilot_api and self._copilot_token:
+            self._github_model_id = model
+            logger.info(f"Copilot model set to: {model}")
+        elif model in GITHUB_MODELS:
+            # For GitHub Models API, map to Azure AI format
             self._github_model_id = GITHUB_MODELS[model]
             logger.info(f"Model changed to: {self._github_model_id}")
         else:
             # Try using it directly
-            self.model = model
             self._github_model_id = model
             logger.info(f"Model changed to: {model} (custom)")
     
     async def initialize(self) -> bool:
-        """Initialize connection to GitHub Models API."""
+        """
+        Initialize connection to GitHub Copilot or Models API.
+        
+        Priority (like OpenClaw):
+        1. Try to get Copilot API access (requires subscription)
+        2. Fall back to GitHub Models API (free, rate-limited)
+        """
         # Get GitHub OAuth token
         github_token = await self._get_github_token()
         if not github_token:
@@ -297,7 +375,24 @@ class CopilotLLM:
         self._github_token = github_token
         self._session_id = str(time.time_ns())
         
-        # Verify the token works with GitHub API
+        # Try to get Copilot API token if enabled
+        if self._use_copilot_api:
+            copilot_result = await self._get_copilot_token(github_token)
+            if copilot_result:
+                self._copilot_token = copilot_result["token"]
+                self._copilot_token_expires_at = copilot_result.get("expires_at")
+                self._copilot_base_url = copilot_result.get("base_url", DEFAULT_COPILOT_API_BASE_URL)
+                logger.info(f"GitHub Copilot API initialized (base: {self._copilot_base_url})")
+                logger.info(f"Using Copilot model: {self.model}")
+                self._initialized = True
+                
+                # Initialize Anthropic fallback if API key is available
+                await self._init_anthropic_fallback()
+                return True
+            else:
+                logger.info("Copilot API not available, falling back to GitHub Models API")
+        
+        # Fall back to GitHub Models API
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
@@ -311,7 +406,7 @@ class CopilotLLM:
                 ) as response:
                     if response.status == 200:
                         user_data = await response.json()
-                        logger.info(f"GitHub Models LLM initialized for user: {user_data.get('login', 'unknown')}")
+                        logger.info(f"GitHub Models API initialized for user: {user_data.get('login', 'unknown')}")
                         logger.info(f"Using model: {self._github_model_id} (default: {DEFAULT_MODEL})")
                         self._initialized = True
                         
@@ -325,6 +420,127 @@ class CopilotLLM:
         except Exception as e:
             logger.error(f"Error validating GitHub token: {e}")
             return False
+    
+    async def _get_copilot_token(self, github_token: str) -> Optional[Dict[str, Any]]:
+        """
+        Exchange GitHub token for Copilot API token.
+        
+        This is the key step for Copilot access - we call GitHub's internal
+        Copilot token endpoint to get an API token that works with the
+        Copilot API endpoints.
+        
+        Based on OpenClaw's implementation in github-copilot-token.ts
+        """
+        import aiohttp
+        
+        # Check for cached token first
+        cached = self._load_cached_copilot_token()
+        if cached:
+            logger.debug(f"Using cached Copilot token (expires: {cached.get('expires_at')})")
+            return cached
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "Authorization": f"Bearer {github_token}",
+                    "Accept": "application/json",
+                    "Editor-Version": "vscode/1.96.2",
+                    "Editor-Plugin-Version": "copilot-chat/0.26.7",
+                    "User-Agent": "GitHubCopilotChat/0.26.7",
+                    "X-Github-Api-Version": "2025-04-01",
+                }
+                
+                async with session.get(COPILOT_TOKEN_URL, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        # Parse the token response
+                        token = data.get("token")
+                        expires_at_str = data.get("expires_at")
+                        
+                        if not token:
+                            logger.warning("Copilot token response missing token")
+                            return None
+                        
+                        # Parse expires_at (usually ISO format or Unix timestamp)
+                        expires_at = None
+                        if expires_at_str:
+                            try:
+                                if isinstance(expires_at_str, (int, float)):
+                                    expires_at = float(expires_at_str)
+                                else:
+                                    # Try ISO format
+                                    from datetime import datetime
+                                    dt = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                                    expires_at = dt.timestamp()
+                            except:
+                                pass
+                        
+                        # Derive base URL from token (like OpenClaw)
+                        base_url = derive_copilot_base_url_from_token(token) or DEFAULT_COPILOT_API_BASE_URL
+                        
+                        result = {
+                            "token": token,
+                            "expires_at": expires_at,
+                            "base_url": base_url,
+                            "source": "api",
+                        }
+                        
+                        # Cache the token
+                        self._save_copilot_token_cache(result)
+                        
+                        return result
+                    
+                    elif response.status == 401:
+                        logger.debug("GitHub token not authorized for Copilot (no subscription)")
+                    elif response.status == 403:
+                        logger.debug("Copilot access forbidden - subscription may be required")
+                    else:
+                        text = await response.text()
+                        logger.debug(f"Copilot token exchange failed: {response.status} - {text}")
+                    
+                    return None
+                    
+        except Exception as e:
+            logger.debug(f"Error getting Copilot token: {e}")
+            return None
+    
+    def _load_cached_copilot_token(self) -> Optional[Dict[str, Any]]:
+        """Load cached Copilot token if still valid."""
+        if not self.COPILOT_TOKEN_CACHE.exists():
+            return None
+        
+        try:
+            data = json.loads(self.COPILOT_TOKEN_CACHE.read_text(encoding="utf-8"))
+            expires_at = data.get("expires_at")
+            
+            # Check if token is still valid (with 5 min buffer)
+            if expires_at and time.time() < expires_at - 300:
+                return data
+            
+        except Exception as e:
+            logger.debug(f"Could not load Copilot token cache: {e}")
+        
+        return None
+    
+    def _save_copilot_token_cache(self, data: Dict[str, Any]) -> None:
+        """Save Copilot token to cache."""
+        try:
+            self.COPILOT_TOKEN_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            cache_data = {
+                **data,
+                "updated_at": time.time(),
+            }
+            self.COPILOT_TOKEN_CACHE.write_text(
+                json.dumps(cache_data, indent=2),
+                encoding="utf-8"
+            )
+            try:
+                os.chmod(self.COPILOT_TOKEN_CACHE, 0o600)
+            except:
+                pass
+        except Exception as e:
+            logger.debug(f"Could not save Copilot token cache: {e}")
     
     async def _init_anthropic_fallback(self):
         """Initialize Anthropic as fallback for heavy tasks."""
@@ -498,8 +714,11 @@ class CopilotLLM:
                 response = await self._call_anthropic_api(messages)
                 return AIMessage(content=response)
             
-            # Otherwise use GitHub Models API (with tool support)
-            response = await self._call_github_models_api(messages, include_tools=True)
+            # Use Copilot API if available, otherwise fall back to GitHub Models API
+            if self._copilot_token:
+                response = await self._call_copilot_api(messages, include_tools=True)
+            else:
+                response = await self._call_github_models_api(messages, include_tools=True)
             
             # Build AIMessage with tool_calls if present
             # Note: content can be None when model requests tool calls
@@ -580,6 +799,109 @@ class CopilotLLM:
         
         response = await self._anthropic_fallback.messages.create(**kwargs)
         return response.content[0].text
+    
+    async def _call_copilot_api(self, messages: List[Dict[str, str]], include_tools: bool = True) -> Dict[str, Any]:
+        """
+        Call the GitHub Copilot API (OpenAI-compatible endpoint).
+        
+        This uses the exchanged Copilot API token against the Copilot API
+        endpoint (like OpenClaw does). The API is OpenAI-compatible.
+        
+        Returns:
+            Dict with 'content' and optionally 'tool_calls'
+        """
+        import aiohttp
+        
+        if not self._copilot_token:
+            raise Exception("Copilot token not available - run authentication first")
+        
+        # Build the chat completions URL
+        api_url = f"{self._copilot_base_url}/chat/completions"
+        
+        headers = {
+            "Authorization": f"Bearer {self._copilot_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            # Copilot-specific headers (like OpenClaw)
+            "Editor-Version": "vscode/1.96.2",
+            "Editor-Plugin-Version": "copilot-chat/0.26.7",
+            "User-Agent": "GitHubCopilotChat/0.26.7",
+            "X-Github-Api-Version": "2025-04-01",
+            "Copilot-Integration-Id": "vscode-chat",
+        }
+        
+        payload = {
+            "model": self.model,  # Use the model name directly (e.g., "gpt-4o")
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": 8192,
+            "stream": False,
+        }
+        
+        # Add tools if bound and requested
+        if include_tools and hasattr(self, '_tools_schema') and self._tools_schema:
+            payload["tools"] = self._tools_schema
+            payload["tool_choice"] = "auto"
+        
+        logger.debug(f"Calling Copilot API ({self._copilot_base_url}) with model: {self.model}")
+        if include_tools and hasattr(self, '_tools_schema'):
+            logger.debug(f"With {len(self._tools_schema)} tools available")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=180)
+            ) as response:
+                response_text = await response.text()
+                
+                if response.status == 200:
+                    data = json.loads(response_text)
+                    message = data["choices"][0]["message"]
+                    
+                    result = {
+                        "content": message.get("content", ""),
+                        "tool_calls": None
+                    }
+                    
+                    # Parse tool calls if present
+                    if "tool_calls" in message and message["tool_calls"]:
+                        result["tool_calls"] = []
+                        for tc in message["tool_calls"]:
+                            tool_call = {
+                                "id": tc.get("id", f"call_{time.time_ns()}"),
+                                "name": tc["function"]["name"],
+                                "args": json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"]
+                            }
+                            result["tool_calls"].append(tool_call)
+                        logger.info(f"Copilot requested {len(result['tool_calls'])} tool calls")
+                    
+                    return result
+                
+                elif response.status == 401:
+                    # Token might be expired, clear cache and fall back
+                    logger.warning("Copilot token expired, clearing cache")
+                    if self.COPILOT_TOKEN_CACHE.exists():
+                        self.COPILOT_TOKEN_CACHE.unlink()
+                    self._copilot_token = None
+                    # Fall back to GitHub Models API
+                    return await self._call_github_models_api(messages, include_tools)
+                
+                elif response.status == 403:
+                    logger.warning(f"Copilot API access denied: {response_text}")
+                    raise Exception(
+                        "Copilot API access denied. Make sure you have an active "
+                        "GitHub Copilot subscription and the model is available."
+                    )
+                
+                elif response.status == 429:
+                    logger.warning("Copilot API rate limited, falling back to GitHub Models")
+                    return await self._call_github_models_api(messages, include_tools)
+                
+                else:
+                    logger.error(f"Copilot API error: {response.status} - {response_text}")
+                    raise Exception(f"Copilot API error {response.status}: {response_text}")
     
     async def _call_github_models_api(self, messages: List[Dict[str, str]], include_tools: bool = True) -> Dict[str, Any]:
         """
