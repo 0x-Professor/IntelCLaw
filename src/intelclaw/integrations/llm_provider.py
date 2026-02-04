@@ -395,7 +395,7 @@ class CopilotLLM:
         logger.info("No GitHub token found, starting interactive authentication...")
         return await GitHubAuth.authenticate()
     
-    async def ainvoke(self, input_data, **kwargs) -> "CopilotResponse":
+    async def ainvoke(self, input_data, **kwargs):
         """
         Invoke the Copilot LLM.
         
@@ -404,8 +404,10 @@ class CopilotLLM:
             **kwargs: Additional parameters
             
         Returns:
-            Response object with content
+            LangChain AIMessage for compatibility with LangGraph
         """
+        from langchain_core.messages import AIMessage
+        
         if not self._initialized:
             await self.initialize()
         
@@ -457,11 +459,11 @@ class CopilotLLM:
             if is_heavy_task and self._use_anthropic_for_heavy and self._anthropic_fallback:
                 logger.info("Using Anthropic Claude for heavy task")
                 response = await self._call_anthropic_api(messages)
-                return CopilotResponse(content=response)
+                return AIMessage(content=response)
             
             # Otherwise use GitHub Models API
             response = await self._call_github_models_api(messages)
-            return CopilotResponse(content=response)
+            return AIMessage(content=response)
         except Exception as e:
             logger.error(f"Primary LLM error: {e}")
             
@@ -470,11 +472,11 @@ class CopilotLLM:
                 try:
                     logger.info("Falling back to Anthropic Claude")
                     response = await self._call_anthropic_api(messages)
-                    return CopilotResponse(content=response)
+                    return AIMessage(content=response)
                 except Exception as fallback_error:
                     logger.error(f"Anthropic fallback also failed: {fallback_error}")
             
-            return CopilotResponse(content=f"Error calling LLM API: {e}")
+            return AIMessage(content=f"Error calling LLM API: {e}")
     
     def _detect_heavy_task(self, messages: List[Dict[str, str]]) -> bool:
         """Detect if messages indicate a heavy/complex task."""
@@ -612,10 +614,13 @@ class CopilotLLM:
         """Stream response from Copilot."""
         # For now, just yield the full response
         response = await self.ainvoke(prompt, **kwargs)
-        yield response.content
+        # Response is now an AIMessage
+        yield response.content if hasattr(response, 'content') else str(response)
     
     def bind_tools(self, tools: List[Any]) -> "CopilotLLM":
-        """Bind tools for function calling."""
+        """Bind tools for function calling - returns self for LangGraph compatibility."""
+        # Store tools for potential use in API calls
+        self._bound_tools = tools
         # Return self for chaining (tools handled separately)
         return self
 
