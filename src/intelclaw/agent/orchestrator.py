@@ -12,6 +12,7 @@ import asyncio
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Annotated, Dict, List, Optional, Sequence, TypedDict, TYPE_CHECKING
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
@@ -60,10 +61,17 @@ class AgentOrchestrator(BaseAgent):
     - Routes complex tasks to specialized sub-agents
     - Maintains conversation context across invocations
     - Integrates with memory system for personalization
+    - Loads persona from markdown files (OpenClaw-style)
     """
     
-    MAX_ITERATIONS = 10
-    MODEL_NAME = "gpt-4o-mini"  # Default to fast, free-tier friendly model
+    MODEL_NAME = "gpt-4o-mini"  # Default model
+    
+    # Persona files to load (OpenClaw-style)
+    PERSONA_DIR = Path(__file__).parent.parent.parent.parent / "persona"
+    PERSONA_FILES = ["AGENT.md", "SOUL.md", "SKILLS.md", "TOOLS.md", "USER.md"]
+    
+    # Context files injected into system prompt
+    BOOTSTRAP_MAX_CHARS = 20000
     
     def __init__(
         self,
@@ -308,10 +316,9 @@ class AgentOrchestrator(BaseAgent):
             "reason" if more thinking needed
             "end" if task is complete
         """
-        # Check iteration limit
-        if state["iteration"] >= state["max_iterations"]:
-            logger.warning("Max iterations reached")
-            return "end"
+        # Log current iteration (no hard limit - let LLM decide when complete)
+        if state["iteration"] > 0:
+            logger.debug(f"REACT iteration: {state['iteration']}")
         
         # Check last message
         last_message = state["messages"][-1] if state["messages"] else None
@@ -353,51 +360,99 @@ class AgentOrchestrator(BaseAgent):
             logger.error(f"Tool execution error: {e}")
             return f"Error executing {tool_name}: {str(e)}"
     
-    def _get_system_prompt(self, context: Dict[str, Any]) -> str:
-        """Build the system prompt with context."""
+    def _load_persona_files(self) -> Dict[str, str]:
+        """
+        Load persona markdown files (OpenClaw-style context injection).
         
-        base_prompt = """You are IntelCLaw, an advanced AI assistant running on Windows.
-You have access to various tools to help accomplish tasks. You MUST use tools when the user asks you to perform actions.
-
-## Your Available Tools:
-- file_write: Write content to files (use this to create files)
-- file_read: Read file contents
-- file_search: Search for files
-- tavily_search: Search the web for information
-- shell_command: Execute shell commands
-- execute_code: Run Python code
-- screenshot: Capture screenshots
-- clipboard: Read/write clipboard
-- launch_app: Launch applications
-
-## IMPORTANT: When to Use Tools
-- When user asks to CREATE a file -> ALWAYS use file_write tool
-- When user asks to READ a file -> ALWAYS use file_read tool
-- When user asks to SEARCH the web -> ALWAYS use tavily_search tool
-- When user asks to RUN a command -> ALWAYS use shell_command tool
-- When user asks to EXECUTE code -> ALWAYS use execute_code tool
-
-## Guidelines:
-1. Think step by step before taking action
-2. ALWAYS use the appropriate tool when the user asks you to DO something (not just explain)
-3. Be security-conscious - ask for confirmation for sensitive operations
-4. Don't just describe what you would do - actually DO IT using tools
-5. Be concise but thorough
-
-## Current Context:
-"""
+        Returns:
+            Dict mapping filename to content
+        """
+        persona_content = {}
+        
+        for filename in self.PERSONA_FILES:
+            filepath = self.PERSONA_DIR / filename
+            try:
+                if filepath.exists():
+                    content = filepath.read_text(encoding="utf-8")
+                    # Truncate large files
+                    if len(content) > self.BOOTSTRAP_MAX_CHARS:
+                        content = content[:self.BOOTSTRAP_MAX_CHARS] + "\n\n[... truncated ...]"
+                    persona_content[filename] = content
+                    logger.debug(f"Loaded persona file: {filename} ({len(content)} chars)")
+            except Exception as e:
+                logger.warning(f"Failed to load persona file {filename}: {e}")
+        
+        return persona_content
+    
+    def _get_system_prompt(self, context: Dict[str, Any]) -> str:
+        """
+        Build the system prompt using persona files (OpenClaw-style).
+        
+        Loads and injects AGENT.md, SOUL.md, SKILLS.md, TOOLS.md, USER.md
+        to define agent identity, personality, and capabilities.
+        """
+        
+        # Get current model name from LLM provider
+        current_model = "unknown"
+        if self._llm_provider and hasattr(self._llm_provider, '_llm'):
+            llm = self._llm_provider._llm
+            if hasattr(llm, 'model'):
+                current_model = llm.model
+        
+        # Load persona files
+        persona = self._load_persona_files()
+        
+        # Build system prompt sections
+        sections = []
+        
+        # Runtime info (model, platform)
+        sections.append(f"""## Runtime
+- Model: {current_model}
+- Provider: GitHub Copilot
+- Platform: Windows
+- Host: IntelCLaw
+""")
+        
+        # Project Context - Persona Files (OpenClaw-style injection)
+        if persona:
+            sections.append("# Project Context\n")
+            sections.append("The following persona files define your identity and behavior:\n")
+            
+            # Check if SOUL.md is present (like OpenClaw)
+            has_soul = "SOUL.md" in persona
+            if has_soul:
+                sections.append(
+                    "If SOUL.md is present, embody its persona and tone. "
+                    "Avoid stiff, generic replies; follow its guidance.\n"
+                )
+            
+            # Inject each persona file
+            for filename, content in persona.items():
+                sections.append(f"## {filename}\n")
+                sections.append(content)
+                sections.append("\n")
+        
+        # Tool usage guidance (minimal - let TOOLS.md handle details)
+        sections.append("""## Tool Usage
+You MUST use tools when the user asks you to perform actions.
+Think step by step before taking action.
+Be security-conscious - ask for confirmation for sensitive operations.
+""")
+        
+        # Current runtime context
+        sections.append("## Current Context\n")
         
         if context.get("active_window"):
-            base_prompt += f"\nActive Window: {context['active_window']}"
+            sections.append(f"Active Window: {context['active_window']}\n")
         
         if context.get("screen_text"):
-            base_prompt += f"\nVisible Text: {context['screen_text'][:500]}..."
+            sections.append(f"Visible Text: {context['screen_text'][:500]}...\n")
         
         if context.get("user_preferences"):
             prefs = context["user_preferences"]
-            base_prompt += f"\nUser Preferences: {prefs}"
+            sections.append(f"User Preferences: {prefs}\n")
         
-        return base_prompt
+        return "\n".join(sections)
     
     async def _initialize_sub_agents(self) -> None:
         """Initialize specialized sub-agents."""
@@ -456,7 +511,7 @@ You have access to various tools to help accomplish tasks. You MUST use tools wh
             "thoughts": [],
             "tools_used": [],
             "iteration": 0,
-            "max_iterations": self.MAX_ITERATIONS,
+            "max_iterations": 999999,  # Effectively unlimited - let LLM decide when to stop
         }
         
         # Run the graph
@@ -543,16 +598,17 @@ You have access to various tools to help accomplish tasks. You MUST use tools wh
             )
         
         try:
-            # Build a simple prompt
-            system_prompt = """You are IntelCLaw, an intelligent AI assistant for Windows. 
-You help users with various tasks including:
-- Answering questions
-- Writing and debugging code
-- System operations
-- Research and information gathering
-- Task management
-
-Be helpful, concise, and accurate in your responses."""
+            # Get current model name
+            current_model = "unknown"
+            if hasattr(self._llm, 'model'):
+                current_model = self._llm.model
+            
+            # Build prompt using persona files (same as _get_system_prompt)
+            system_prompt = self._get_system_prompt({
+                "active_window": getattr(context, 'active_window', None),
+                "screen_text": context.screen_context.get("text") if context.screen_context else None,
+                "user_preferences": getattr(context, 'user_preferences', None),
+            })
             
             messages = [
                 SystemMessage(content=system_prompt),

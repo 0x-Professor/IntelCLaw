@@ -46,17 +46,14 @@ WS_URL = "ws://127.0.0.1:8765/ws"
 TIMEOUT = 30
 CHAT_TIMEOUT = 120  # Longer timeout for chat responses
 
-# Test models to try (will be filtered based on availability)
+# Test models to try (GitHub Copilot models only)
 TEST_MODELS = [
-    # Copilot models (prioritized)
     {"id": "claude-sonnet-4", "provider": "github-copilot", "priority": 1},
     {"id": "gpt-4.1", "provider": "github-copilot", "priority": 2},
     {"id": "gemini-2.5-pro", "provider": "github-copilot", "priority": 3},
     {"id": "gpt-4o", "provider": "github-copilot", "priority": 4},
     {"id": "claude-sonnet-4.5", "provider": "github-copilot", "priority": 5},
-    # Free tier models (fallback)
-    {"id": "gpt-4o-mini", "provider": "github-models", "priority": 10},
-    {"id": "llama-3.3-70b", "provider": "github-models", "priority": 11},
+    {"id": "o1", "provider": "github-copilot", "priority": 6},
 ]
 
 # Tool test prompts - designed to trigger specific tools
@@ -599,8 +596,8 @@ async def test_multi_model_chat(available_models: List[Dict]):
         
         # Switch model
         if await test_model_switch(model_id, provider):
-            # Test chat with this model
-            prompt = "Say 'Hello' and your model name in one line."
+            # Test chat with this model - ask for specific model name
+            prompt = "What is your exact model name? Just say 'I am [model name]' in one line."
             await test_rest_chat(prompt, f"{model_id}")
             await asyncio.sleep(1)  # Rate limit
 
