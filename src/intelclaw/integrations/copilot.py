@@ -48,7 +48,7 @@ class CopilotIntegration:
         """
         self.config = config
         self._enabled = config.get("copilot.enabled", True)
-        self._current_model = config.get("copilot.model", "gpt-4o")
+        self._current_model = config.get("copilot.model", "gpt-4o-mini")
     
     async def initialize(self) -> None:
         """Initialize Copilot integration."""

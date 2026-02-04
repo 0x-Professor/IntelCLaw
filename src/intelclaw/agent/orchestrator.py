@@ -63,7 +63,7 @@ class AgentOrchestrator(BaseAgent):
     """
     
     MAX_ITERATIONS = 10
-    MODEL_NAME = "gpt-4o"
+    MODEL_NAME = "gpt-4o-mini"  # Default to fast, free-tier friendly model
     
     def __init__(
         self,

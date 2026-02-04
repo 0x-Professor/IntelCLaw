@@ -944,3 +944,179 @@ NameError: name 'os' is not defined. Did you forget to import 'os'?
 2026-02-04 18:53:59 | SUCCESS  | intelclaw.core.app:startup:143 - IntelCLaw started successfully!
 2026-02-04 18:53:59 | INFO     | __main__:run_web_server:364 - Opening browser at http://127.0.0.1:8765
 2026-02-04 18:54:00 | INFO     | intelclaw.web.server:start:1441 - Starting web server at http://127.0.0.1:8765
+2026-02-04 19:09:07 | INFO     | main:run_web_server:342 - ==================================================
+2026-02-04 19:09:07 | INFO     | main:run_web_server:343 - IntelCLaw - Web Interface
+2026-02-04 19:09:07 | INFO     | main:run_web_server:344 - ==================================================
+2026-02-04 19:09:08 | INFO     | intelclaw.core.app:__init__:75 - IntelCLaw application instance created
+2026-02-04 19:09:08 | INFO     | intelclaw.core.app:startup:79 - Starting IntelCLaw...
+2026-02-04 19:09:08 | INFO     | intelclaw.config.manager:load:124 - Configuration loaded from config.yaml
+2026-02-04 19:09:08 | INFO     | intelclaw.core.app:startup:84 - Configuration loaded
+2026-02-04 19:09:08 | INFO     | intelclaw.security.manager:initialize:55 - Initializing security manager...
+2026-02-04 19:09:08 | INFO     | intelclaw.security.manager:initialize:67 - Security manager initialized
+2026-02-04 19:09:08 | INFO     | intelclaw.core.app:startup:89 - Security manager initialized
+2026-02-04 19:09:08 | DEBUG    | intelclaw.memory.manager:__init__:68 - MemoryManager created
+2026-02-04 19:09:08 | INFO     | intelclaw.memory.manager:initialize:72 - Initializing memory system...
+2026-02-04 19:09:08 | INFO     | intelclaw.memory.working_memory:initialize:58 - Working memory initialized at data\working_memory.db
+2026-02-04 19:09:08 | WARNING  | intelclaw.memory.long_term:initialize:91 - Mem0 initialization failed: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable, using fallback
+2026-02-04 19:09:08 | INFO     | intelclaw.memory.vector_store:initialize:78 - Vector store initialized: intelclaw
+2026-02-04 19:09:08 | SUCCESS  | intelclaw.memory.manager:initialize:102 - Memory system initialized
+2026-02-04 19:09:08 | INFO     | intelclaw.core.app:startup:94 - Memory system initialized
+2026-02-04 19:09:08 | INFO     | intelclaw.memory.data_store:initialize:150 - DataStore initialized
+2026-02-04 19:09:08 | INFO     | intelclaw.core.app:startup:99 - Data store initialized
+2026-02-04 19:09:08 | DEBUG    | intelclaw.perception.manager:__init__:91 - PerceptionManager created
+2026-02-04 19:09:08 | INFO     | intelclaw.perception.manager:initialize:95 - Initializing perception layer...
+2026-02-04 19:09:08 | INFO     | intelclaw.perception.screen_capture:initialize:62 - Screen capture initialized with 1 monitors
+2026-02-04 19:09:08 | WARNING  | intelclaw.perception.ocr:initialize:55 - Tesseract not found: tesseract is not installed or it's not in your PATH. See README file for more information.. Install from https://github.com/tesseract-ocr/tesseract
+2026-02-04 19:09:08 | WARNING  | intelclaw.perception.ui_automation:initialize:50 - UI Automation not available (win32 not installed)
+2026-02-04 19:09:08 | INFO     | intelclaw.perception.activity_monitor:initialize:92 - Initializing activity monitor...
+2026-02-04 19:09:09 | DEBUG    | intelclaw.perception.activity_monitor:initialize:99 - Keyboard activity tracking enabled
+2026-02-04 19:09:09 | INFO     | intelclaw.perception.activity_monitor:initialize:104 - Activity monitor initialized
+2026-02-04 19:09:09 | SUCCESS  | intelclaw.perception.manager:initialize:130 - Perception layer initialized
+2026-02-04 19:09:09 | INFO     | intelclaw.core.app:startup:104 - Perception layer initialized
+2026-02-04 19:09:09 | DEBUG    | intelclaw.tools.registry:__init__:52 - ToolRegistry created
+2026-02-04 19:09:09 | INFO     | intelclaw.tools.registry:initialize:56 - Initializing tool registry...
+2026-02-04 19:09:09 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: tavily_search
+2026-02-04 19:09:09 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_read
+2026-02-04 19:09:09 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_write
+2026-02-04 19:09:09 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_search
+2026-02-04 19:09:09 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: screenshot
+2026-02-04 19:09:09 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: clipboard
+2026-02-04 19:09:09 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: launch_app
+2026-02-04 19:09:09 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: web_scrape
+2026-02-04 19:09:09 | DEBUG    | intelclaw.tools.registry:_load_mcp_tools:226 - MCP tool loading not yet implemented
+2026-02-04 19:09:09 | SUCCESS  | intelclaw.tools.registry:initialize:67 - Tool registry initialized with 8 tools
+2026-02-04 19:09:09 | INFO     | intelclaw.core.app:startup:109 - Tool registry initialized
+2026-02-04 19:09:09 | INFO     | intelclaw.integrations.copilot:initialize:63 - Copilot integration initialized (model: gpt-4o)
+2026-02-04 19:09:09 | INFO     | intelclaw.integrations.copilot:initialize:229 - Model manager initialized: {'primary': 'gpt-4o', 'fallback': 'gpt-4o-mini', 'coding': 'gpt-4o'}
+2026-02-04 19:09:09 | INFO     | intelclaw.core.app:startup:116 - Copilot integration initialized
+2026-02-04 19:09:09 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'IntelCLaw Orchestrator' initialized
+2026-02-04 19:09:09 | INFO     | intelclaw.agent.orchestrator:__init__:107 - AgentOrchestrator created
+2026-02-04 19:09:09 | INFO     | intelclaw.agent.orchestrator:initialize:111 - Initializing AgentOrchestrator...
+2026-02-04 19:09:09 | DEBUG    | intelclaw.cli.auth:_load_profiles:125 - Loaded 1 auth profiles
+2026-02-04 19:09:09 | DEBUG    | intelclaw.integrations.llm_provider:_get_github_token:332 - Using token from auth profile: github-models
+2026-02-04 19:09:09 | INFO     | intelclaw.integrations.llm_provider:initialize:291 - GitHub Models LLM initialized for user: 0x-Professor
+2026-02-04 19:09:09 | INFO     | intelclaw.integrations.llm_provider:initialize:292 - Using model: openai/gpt-4o
+2026-02-04 19:09:09 | INFO     | intelclaw.integrations.llm_provider:initialize:546 - Using GitHub Copilot as LLM provider
+2026-02-04 19:09:09 | INFO     | intelclaw.agent.orchestrator:initialize:125 - Using LLM provider: copilot
+2026-02-04 19:09:09 | DEBUG    | intelclaw.agent.orchestrator:_build_graph:193 - LangGraph REACT workflow built
+2026-02-04 19:09:09 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Research Agent' initialized
+2026-02-04 19:09:09 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Coding Agent' initialized
+2026-02-04 19:09:09 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Task Agent' initialized
+2026-02-04 19:09:09 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'System Agent' initialized
+2026-02-04 19:09:09 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: research
+2026-02-04 19:09:09 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: coding
+2026-02-04 19:09:09 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: task
+2026-02-04 19:09:09 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: system
+2026-02-04 19:09:09 | INFO     | intelclaw.agent.orchestrator:_initialize_sub_agents:404 - Initialized 4 sub-agents
+2026-02-04 19:09:09 | SUCCESS  | intelclaw.agent.orchestrator:initialize:138 - AgentOrchestrator initialized
+2026-02-04 19:09:09 | INFO     | intelclaw.core.app:startup:126 - Agent orchestrator initialized
+2026-02-04 19:09:09 | INFO     | intelclaw.agent.self_improvement:initialize:51 - Self-improvement module initialized
+2026-02-04 19:09:09 | INFO     | intelclaw.core.app:startup:131 - Self-improvement module initialized
+2026-02-04 19:09:09 | INFO     | intelclaw.core.app:startup:140 - Running in web mode - Qt UI disabled
+2026-02-04 19:09:09 | SUCCESS  | intelclaw.core.app:startup:143 - IntelCLaw started successfully!
+2026-02-04 19:09:09 | INFO     | intelclaw.web.server:_setup_routes:95 - Mounted static files from: M:\IntelCLaw\src\intelclaw\web\static
+2026-02-04 19:09:09 | INFO     | main:run_web_server:364 - Opening browser at http://127.0.0.1:8765
+2026-02-04 19:09:10 | INFO     | intelclaw.web.server:start:424 - 🦅 IntelCLaw Web Server starting on http://127.0.0.1:8765
+2026-02-04 19:09:10 | INFO     | intelclaw.web.server:connect:37 - WebSocket connected. Total connections: 1
+2026-02-04 19:09:10 | INFO     | intelclaw.web.server:websocket_endpoint:191 - New session: session_1770214150777
+2026-02-04 19:09:18 | ERROR    | intelclaw.integrations.llm_provider:ainvoke:452 - GitHub Models API error: GitHub Models API access denied
+2026-02-04 19:09:18 | ERROR    | intelclaw.agent.orchestrator:process:501 - Agent processing error: Unsupported message type: <class 'intelclaw.integrations.llm_provider.CopilotResponse'>
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/MESSAGE_COERCION_FAILURE 
+2026-02-04 19:09:25 | ERROR    | intelclaw.integrations.llm_provider:ainvoke:452 - GitHub Models API error: GitHub Models API access denied
+2026-02-04 19:09:29 | INFO     | intelclaw.web.server:connect:37 - WebSocket connected. Total connections: 2
+2026-02-04 19:09:29 | INFO     | intelclaw.web.server:websocket_endpoint:191 - New session: session_1770214169740
+2026-02-04 19:13:12 | INFO     | intelclaw.web.server:websocket_endpoint:191 - New session: session_1770214392254
+2026-02-04 19:13:20 | ERROR    | intelclaw.integrations.llm_provider:ainvoke:452 - GitHub Models API error: GitHub Models API access denied
+2026-02-04 19:13:20 | ERROR    | intelclaw.agent.orchestrator:process:501 - Agent processing error: Unsupported message type: <class 'intelclaw.integrations.llm_provider.CopilotResponse'>
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/MESSAGE_COERCION_FAILURE 
+2026-02-04 19:13:20 | ERROR    | intelclaw.integrations.llm_provider:ainvoke:452 - GitHub Models API error: GitHub Models API access denied
+2026-02-04 19:13:28 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 1
+2026-02-04 19:13:55 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 0
+2026-02-04 19:14:54 | INFO     | main:run_web_server:342 - ==================================================
+2026-02-04 19:14:54 | INFO     | main:run_web_server:343 - IntelCLaw - Web Interface
+2026-02-04 19:14:54 | INFO     | main:run_web_server:344 - ==================================================
+2026-02-04 19:14:55 | INFO     | intelclaw.core.app:__init__:75 - IntelCLaw application instance created
+2026-02-04 19:14:55 | INFO     | intelclaw.core.app:startup:79 - Starting IntelCLaw...
+2026-02-04 19:14:55 | INFO     | intelclaw.config.manager:load:124 - Configuration loaded from config.yaml
+2026-02-04 19:14:55 | INFO     | intelclaw.core.app:startup:84 - Configuration loaded
+2026-02-04 19:14:55 | INFO     | intelclaw.security.manager:initialize:55 - Initializing security manager...
+2026-02-04 19:14:55 | INFO     | intelclaw.security.manager:initialize:67 - Security manager initialized
+2026-02-04 19:14:55 | INFO     | intelclaw.core.app:startup:89 - Security manager initialized
+2026-02-04 19:14:55 | DEBUG    | intelclaw.memory.manager:__init__:68 - MemoryManager created
+2026-02-04 19:14:55 | INFO     | intelclaw.memory.manager:initialize:72 - Initializing memory system...
+2026-02-04 19:14:55 | INFO     | intelclaw.memory.working_memory:initialize:58 - Working memory initialized at data\working_memory.db
+2026-02-04 19:14:56 | WARNING  | intelclaw.memory.long_term:initialize:91 - Mem0 initialization failed: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable, using fallback
+2026-02-04 19:14:56 | INFO     | intelclaw.memory.vector_store:initialize:78 - Vector store initialized: intelclaw
+2026-02-04 19:14:56 | SUCCESS  | intelclaw.memory.manager:initialize:102 - Memory system initialized
+2026-02-04 19:14:56 | INFO     | intelclaw.core.app:startup:94 - Memory system initialized
+2026-02-04 19:14:56 | INFO     | intelclaw.memory.data_store:initialize:150 - DataStore initialized
+2026-02-04 19:14:56 | INFO     | intelclaw.core.app:startup:99 - Data store initialized
+2026-02-04 19:14:56 | DEBUG    | intelclaw.perception.manager:__init__:91 - PerceptionManager created
+2026-02-04 19:14:56 | INFO     | intelclaw.perception.manager:initialize:95 - Initializing perception layer...
+2026-02-04 19:14:56 | INFO     | intelclaw.perception.screen_capture:initialize:62 - Screen capture initialized with 1 monitors
+2026-02-04 19:14:56 | WARNING  | intelclaw.perception.ocr:initialize:55 - Tesseract not found: tesseract is not installed or it's not in your PATH. See README file for more information.. Install from https://github.com/tesseract-ocr/tesseract
+2026-02-04 19:14:56 | WARNING  | intelclaw.perception.ui_automation:initialize:50 - UI Automation not available (win32 not installed)
+2026-02-04 19:14:56 | INFO     | intelclaw.perception.activity_monitor:initialize:92 - Initializing activity monitor...
+2026-02-04 19:14:56 | DEBUG    | intelclaw.perception.activity_monitor:initialize:99 - Keyboard activity tracking enabled
+2026-02-04 19:14:56 | INFO     | intelclaw.perception.activity_monitor:initialize:104 - Activity monitor initialized
+2026-02-04 19:14:56 | SUCCESS  | intelclaw.perception.manager:initialize:130 - Perception layer initialized
+2026-02-04 19:14:56 | INFO     | intelclaw.core.app:startup:104 - Perception layer initialized
+2026-02-04 19:14:56 | DEBUG    | intelclaw.tools.registry:__init__:52 - ToolRegistry created
+2026-02-04 19:14:56 | INFO     | intelclaw.tools.registry:initialize:56 - Initializing tool registry...
+2026-02-04 19:14:56 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: tavily_search
+2026-02-04 19:14:56 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_read
+2026-02-04 19:14:56 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_write
+2026-02-04 19:14:56 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_search
+2026-02-04 19:14:56 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: screenshot
+2026-02-04 19:14:56 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: clipboard
+2026-02-04 19:14:56 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: launch_app
+2026-02-04 19:14:56 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: web_scrape
+2026-02-04 19:14:56 | DEBUG    | intelclaw.tools.registry:_load_mcp_tools:226 - MCP tool loading not yet implemented
+2026-02-04 19:14:56 | SUCCESS  | intelclaw.tools.registry:initialize:67 - Tool registry initialized with 8 tools
+2026-02-04 19:14:56 | INFO     | intelclaw.core.app:startup:109 - Tool registry initialized
+2026-02-04 19:14:56 | INFO     | intelclaw.integrations.copilot:initialize:63 - Copilot integration initialized (model: gpt-4o)
+2026-02-04 19:14:56 | INFO     | intelclaw.integrations.copilot:initialize:229 - Model manager initialized: {'primary': 'gpt-4o', 'fallback': 'gpt-4o-mini', 'coding': 'gpt-4o'}
+2026-02-04 19:14:56 | INFO     | intelclaw.core.app:startup:116 - Copilot integration initialized
+2026-02-04 19:14:56 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'IntelCLaw Orchestrator' initialized
+2026-02-04 19:14:56 | INFO     | intelclaw.agent.orchestrator:__init__:107 - AgentOrchestrator created
+2026-02-04 19:14:56 | INFO     | intelclaw.agent.orchestrator:initialize:111 - Initializing AgentOrchestrator...
+2026-02-04 19:14:56 | DEBUG    | intelclaw.cli.auth:_load_profiles:132 - Loaded 1 auth profiles
+2026-02-04 19:14:56 | DEBUG    | intelclaw.integrations.llm_provider:_get_github_token:375 - Using token from auth profile: github-models
+2026-02-04 19:14:57 | INFO     | intelclaw.integrations.llm_provider:initialize:316 - GitHub Models LLM initialized for user: 0x-Professor
+2026-02-04 19:14:57 | INFO     | intelclaw.integrations.llm_provider:initialize:317 - Using model: gpt-4o (default: gpt-4o-mini)
+2026-02-04 19:14:57 | INFO     | intelclaw.integrations.llm_provider:initialize:696 - Using GitHub Copilot as LLM provider
+2026-02-04 19:14:57 | INFO     | intelclaw.agent.orchestrator:initialize:125 - Using LLM provider: copilot
+2026-02-04 19:14:57 | DEBUG    | intelclaw.agent.orchestrator:_build_graph:193 - LangGraph REACT workflow built
+2026-02-04 19:14:57 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Research Agent' initialized
+2026-02-04 19:14:57 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Coding Agent' initialized
+2026-02-04 19:14:57 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Task Agent' initialized
+2026-02-04 19:14:57 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'System Agent' initialized
+2026-02-04 19:14:57 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: research
+2026-02-04 19:14:57 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: coding
+2026-02-04 19:14:57 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: task
+2026-02-04 19:14:57 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: system
+2026-02-04 19:14:57 | INFO     | intelclaw.agent.orchestrator:_initialize_sub_agents:404 - Initialized 4 sub-agents
+2026-02-04 19:14:57 | SUCCESS  | intelclaw.agent.orchestrator:initialize:138 - AgentOrchestrator initialized
+2026-02-04 19:14:57 | INFO     | intelclaw.core.app:startup:126 - Agent orchestrator initialized
+2026-02-04 19:14:57 | INFO     | intelclaw.agent.self_improvement:initialize:51 - Self-improvement module initialized
+2026-02-04 19:14:57 | INFO     | intelclaw.core.app:startup:131 - Self-improvement module initialized
+2026-02-04 19:14:57 | INFO     | intelclaw.core.app:startup:140 - Running in web mode - Qt UI disabled
+2026-02-04 19:14:57 | SUCCESS  | intelclaw.core.app:startup:143 - IntelCLaw started successfully!
+2026-02-04 19:14:57 | INFO     | intelclaw.web.server:_setup_routes:95 - Mounted static files from: M:\IntelCLaw\src\intelclaw\web\static
+2026-02-04 19:14:57 | INFO     | main:run_web_server:364 - Opening browser at http://127.0.0.1:8765
+2026-02-04 19:14:57 | INFO     | intelclaw.web.server:start:432 - 🦅 IntelCLaw Web Server starting on http://127.0.0.1:8765
+2026-02-04 19:14:58 | INFO     | intelclaw.web.server:connect:37 - WebSocket connected. Total connections: 1
+2026-02-04 19:14:58 | INFO     | intelclaw.web.server:websocket_endpoint:199 - New session: session_1770214498104
+2026-02-04 19:15:00 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:593 - Calling GitHub Models API with model: gpt-4o
+2026-02-04 19:15:00 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:594 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-04 19:15:02 | WARNING  | intelclaw.integrations.llm_provider:_call_github_models_api:609 - GitHub Models API returned 401 - unauthorized
+2026-02-04 19:15:02 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:610 - Response: {"error":{"code":"unauthorized","message":"The `models` permission is required to access this endpoint","details":"The `models` permission is required to access this endpoint"}}
+2026-02-04 19:15:02 | ERROR    | intelclaw.integrations.llm_provider:ainvoke:505 - Primary LLM error: GitHub authentication failed. To fix this:\n1. Create a GitHub Personal Access Token at https://github.com/settings/tokens\n2. Set it as environment variable: set GITHUB_TOKEN=your_token_here\n3. Restart IntelCLaw
+2026-02-04 19:15:02 | ERROR    | intelclaw.agent.orchestrator:process:501 - Agent processing error: Unsupported message type: <class 'intelclaw.integrations.llm_provider.CopilotResponse'>
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/MESSAGE_COERCION_FAILURE 
+2026-02-04 19:15:02 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:593 - Calling GitHub Models API with model: gpt-4o
+2026-02-04 19:15:02 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:594 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-04 19:15:03 | WARNING  | intelclaw.integrations.llm_provider:_call_github_models_api:609 - GitHub Models API returned 401 - unauthorized
+2026-02-04 19:15:03 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:610 - Response: {"error":{"code":"unauthorized","message":"The `models` permission is required to access this endpoint","details":"The `models` permission is required to access this endpoint"}}
+2026-02-04 19:15:03 | ERROR    | intelclaw.integrations.llm_provider:ainvoke:505 - Primary LLM error: GitHub authentication failed. To fix this:\n1. Create a GitHub Personal Access Token at https://github.com/settings/tokens\n2. Set it as environment variable: set GITHUB_TOKEN=your_token_here\n3. Restart IntelCLaw
+2026-02-04 19:15:21 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 0

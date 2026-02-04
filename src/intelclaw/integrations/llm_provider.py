@@ -1,11 +1,18 @@
 """
-GitHub Copilot LLM Provider - Use Copilot as the LLM backend.
+GitHub Models LLM Provider - Use GitHub Models API as the LLM backend.
 
 This module enables IntelCLaw to use GitHub's AI models
-through the GitHub Models API (https://models.github.ai).
+through the GitHub Models API (https://github.com/marketplace/models).
 
-This works with any GitHub account and uses the free GitHub Models API,
-which provides access to models like GPT-4, GPT-4o, Claude, Llama, and more.
+This works with any GitHub account and uses the free GitHub Models API.
+You need a GitHub Personal Access Token (PAT) to use this service.
+
+To get started:
+1. Go to https://github.com/settings/tokens
+2. Create a new token (classic) with no special scopes required
+3. Set the token as GITHUB_TOKEN environment variable
+
+The API provides access to models like GPT-4o, GPT-4o-mini, Llama, Mistral, and more.
 """
 
 import asyncio
@@ -24,8 +31,9 @@ from loguru import logger
 # GitHub OAuth App Client ID for Copilot (same as VS Code uses)
 GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 
-# GitHub Models API endpoint (free, works with any GitHub token)
-GITHUB_MODELS_API_URL = "https://models.github.ai/inference/chat/completions"
+# GitHub Models API endpoint - uses Azure AI inference
+# See: https://github.com/marketplace/models/azure-openai/gpt-4o-mini
+GITHUB_MODELS_API_URL = "https://models.inference.ai.azure.com/chat/completions"
 
 # Model ID mappings for GitHub Models API
 # See: https://github.com/marketplace/models
@@ -562,18 +570,17 @@ class CopilotLLM:
         return response.content[0].text
     
     async def _call_github_models_api(self, messages: List[Dict[str, str]]) -> str:
-        """Call the GitHub Models API."""
+        """Call the GitHub Models API (Azure AI inference endpoint)."""
         import aiohttp
         
         if not self._github_token:
-            raise Exception("GitHub token not available")
+            raise Exception("GitHub token not available - set GITHUB_TOKEN environment variable")
         
         # GitHub Models API uses Azure-hosted inference endpoint
-        # The token needs to be a GitHub PAT with proper scopes
+        # Authentication requires a GitHub Personal Access Token (PAT)
         headers = {
             "Authorization": f"Bearer {self._github_token}",
             "Content-Type": "application/json",
-            "Accept": "application/json",
         }
         
         payload = {
@@ -581,10 +588,10 @@ class CopilotLLM:
             "messages": messages,
             "temperature": 0.1,
             "max_tokens": 4096,
-            "stream": False,
         }
         
         logger.debug(f"Calling GitHub Models API with model: {self._github_model_id}")
+        logger.debug(f"API URL: {GITHUB_MODELS_API_URL}")
         
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -601,13 +608,38 @@ class CopilotLLM:
                 elif response.status == 401:
                     logger.warning("GitHub Models API returned 401 - unauthorized")
                     logger.debug(f"Response: {response_text}")
-                    raise Exception("GitHub authentication failed - ensure you have a valid GitHub token with models access")
+                    raise Exception(
+                        "GitHub authentication failed. To fix this:\\n"
+                        "1. Create a GitHub Personal Access Token at https://github.com/settings/tokens\\n"
+                        "2. Set it as environment variable: set GITHUB_TOKEN=your_token_here\\n"
+                        "3. Restart IntelCLaw"
+                    )
                 elif response.status == 403:
                     logger.warning("GitHub Models API returned 403 - forbidden")
                     logger.debug(f"Response: {response_text}")
-                    raise Exception("GitHub Models API access denied - you may need to enable GitHub Models in your account settings at https://github.com/settings/copilot")
+                    raise Exception(
+                        "GitHub Models API access denied. To fix this:\\n"
+                        "1. Visit https://github.com/marketplace/models and accept the terms\\n"
+                        "2. Ensure your GitHub account has access to GitHub Models\\n"
+                        "3. Create a new Personal Access Token if needed"
+                    )
                 elif response.status == 404:
                     logger.warning(f"Model not found: {self._github_model_id}")
+                    # Try falling back to gpt-4o-mini
+                    if self._github_model_id != "gpt-4o-mini":
+                        logger.info("Falling back to gpt-4o-mini")
+                        self._github_model_id = "gpt-4o-mini"
+                        payload["model"] = "gpt-4o-mini"
+                        # Retry with fallback model
+                        async with session.post(
+                            GITHUB_MODELS_API_URL,
+                            headers=headers,
+                            json=payload,
+                            timeout=aiohttp.ClientTimeout(total=120)
+                        ) as retry_response:
+                            if retry_response.status == 200:
+                                retry_data = await retry_response.json()
+                                return retry_data["choices"][0]["message"]["content"]
                     raise Exception(f"Model '{self._github_model_id}' not found on GitHub Models API")
                 elif response.status == 429:
                     raise Exception("GitHub Models API rate limit exceeded - try again later")
@@ -657,7 +689,7 @@ class LLMProvider:
         """Initialize the best available LLM provider."""
         
         # 1. Try GitHub Copilot first (no API key needed)
-        copilot = CopilotLLM(model=self.config.get("model", "gpt-4o"))
+        copilot = CopilotLLM(model=self.config.get("model", "gpt-4o-mini"))
         if await copilot.initialize():
             self._llm = copilot
             self._provider_name = "copilot"
