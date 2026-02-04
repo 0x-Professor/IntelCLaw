@@ -92,8 +92,29 @@ def cli():
         action="version",
         version="IntelCLaw 0.1.0"
     )
+    parser.add_argument(
+        "--auth",
+        action="store_true",
+        help="Authenticate with GitHub Copilot"
+    )
+    parser.add_argument(
+        "--logout",
+        action="store_true",
+        help="Clear saved GitHub authentication"
+    )
     
     args = parser.parse_args()
+    
+    # Handle auth commands
+    if args.auth:
+        from intelclaw.integrations.llm_provider import GitHubAuth
+        asyncio.run(GitHubAuth.authenticate())
+        return
+    
+    if args.logout:
+        from intelclaw.integrations.llm_provider import GitHubAuth
+        GitHubAuth.clear_token()
+        return
     
     # Store args for app to use
     import os
