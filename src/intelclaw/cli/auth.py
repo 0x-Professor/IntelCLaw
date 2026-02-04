@@ -65,7 +65,7 @@ class AuthManager:
     Supported providers:
     - github-copilot: GitHub Copilot via device OAuth flow
     - openai: OpenAI API key
-    - anthropic: Anthropic API key
+    - anthropic: Anthropic API key (for heavy tasks)
     - github-models: GitHub Models API (free)
     """
     
@@ -80,19 +80,25 @@ class AuthManager:
             "name": "GitHub Models (Free)",
             "auth_modes": ["oauth", "token"],
             "models": [
-                # OpenAI GPT Models
-                "gpt-4.1", "gpt-4o", "gpt-5-mini", "gpt-5", "gpt-5.1", "gpt-5.2",
-                "gpt-5-codex", "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini",
-                # Anthropic Claude Models
-                "claude-haiku-4.5", "claude-opus-4.5", "claude-sonnet-4", "claude-sonnet-4.5",
-                # Google Gemini Models  
-                "gemini-2.5-pro", "gemini-3-flash", "gemini-3-pro",
-                # xAI Grok Models
-                "grok-code-fast-1",
-                # Raptor Models
-                "raptor-mini",
+                # OpenAI Models (default: gpt-4o-mini)
+                "gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4",
+                "o1-preview", "o1-mini",
+                # Meta Llama Models
+                "llama-3.3-70b", "llama-3.2-90b", "llama-3.1-405b", 
+                "llama-3.1-70b", "llama-3.1-8b",
+                # Mistral Models
+                "mistral-large", "mistral-small", "mistral-nemo",
+                # DeepSeek Models
+                "deepseek-r1", "deepseek-v3",
+                # Microsoft Phi Models
+                "phi-4", "phi-3.5-moe", "phi-3.5-mini",
+                # Cohere Models
+                "cohere-command-r", "cohere-command-r-plus",
+                # AI21 Models
+                "jamba-1.5-large", "jamba-1.5-mini",
             ],
             "requires_subscription": False,
+            "default_model": "gpt-4o-mini",
         },
         "openai": {
             "name": "OpenAI",
@@ -101,10 +107,11 @@ class AuthManager:
             "requires_subscription": False,
         },
         "anthropic": {
-            "name": "Anthropic",
+            "name": "Anthropic (Heavy Tasks)",
             "auth_modes": ["api_key"],
-            "models": ["claude-3-opus", "claude-3.5-sonnet", "claude-3-haiku"],
+            "models": ["claude-3-5-sonnet", "claude-3-opus", "claude-3-haiku"],
             "requires_subscription": False,
+            "description": "Used for complex reasoning and heavy tasks when API key is provided",
         },
     }
     

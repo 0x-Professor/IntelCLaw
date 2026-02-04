@@ -480,13 +480,86 @@ class CopilotLLM:
                         role = "assistant"
                     messages.append({"role": role, "content": msg.content})
         
+        # Detect if this is a heavy task (complex reasoning required)
+        is_heavy_task = kwargs.get("heavy_task", False) or self._detect_heavy_task(messages)
+        
         try:
+            # Use Anthropic for heavy tasks if available
+            if is_heavy_task and self._use_anthropic_for_heavy and self._anthropic_fallback:
+                logger.info("Using Anthropic Claude for heavy task")
+                response = await self._call_anthropic_api(messages)
+                return CopilotResponse(content=response)
+            
+            # Otherwise use GitHub Models API
             response = await self._call_github_models_api(messages)
             return CopilotResponse(content=response)
         except Exception as e:
-            logger.error(f"GitHub Models API error: {e}")
-            # Fallback to local processing or error message
-            return CopilotResponse(content=f"Error calling GitHub Models API: {e}")
+            logger.error(f"Primary LLM error: {e}")
+            
+            # Try Anthropic fallback on failure
+            if self._use_anthropic_for_heavy and self._anthropic_fallback:
+                try:
+                    logger.info("Falling back to Anthropic Claude")
+                    response = await self._call_anthropic_api(messages)
+                    return CopilotResponse(content=response)
+                except Exception as fallback_error:
+                    logger.error(f"Anthropic fallback also failed: {fallback_error}")
+            
+            return CopilotResponse(content=f"Error calling LLM API: {e}")
+    
+    def _detect_heavy_task(self, messages: List[Dict[str, str]]) -> bool:
+        """Detect if messages indicate a heavy/complex task."""
+        # Check for indicators of complex tasks
+        heavy_indicators = [
+            "analyze", "explain in detail", "write a full", "implement",
+            "create a complete", "debug", "refactor", "architecture",
+            "complex", "comprehensive", "multi-step", "algorithm"
+        ]
+        
+        text = " ".join(msg.get("content", "").lower() for msg in messages)
+        
+        # Heavy if text is long (>1000 chars) or contains indicators
+        if len(text) > 1000:
+            return True
+        
+        for indicator in heavy_indicators:
+            if indicator in text:
+                return True
+        
+        return False
+    
+    async def _call_anthropic_api(self, messages: List[Dict[str, str]]) -> str:
+        """Call Anthropic API for heavy tasks."""
+        if not self._anthropic_fallback:
+            raise Exception("Anthropic client not initialized")
+        
+        # Convert messages to Anthropic format
+        system_msg = None
+        anthropic_messages = []
+        
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            
+            if role == "system":
+                system_msg = content
+            else:
+                anthropic_messages.append({
+                    "role": "user" if role in ["user", "human"] else "assistant",
+                    "content": content
+                })
+        
+        # Use Claude 3.5 Sonnet for heavy tasks
+        kwargs = {
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 8192,
+            "messages": anthropic_messages
+        }
+        if system_msg:
+            kwargs["system"] = system_msg
+        
+        response = await self._anthropic_fallback.messages.create(**kwargs)
+        return response.content[0].text
     
     async def _call_github_models_api(self, messages: List[Dict[str, str]]) -> str:
         """Call the GitHub Models API."""
@@ -495,11 +568,12 @@ class CopilotLLM:
         if not self._github_token:
             raise Exception("GitHub token not available")
         
+        # GitHub Models API uses Azure-hosted inference endpoint
+        # The token needs to be a GitHub PAT with proper scopes
         headers = {
             "Authorization": f"Bearer {self._github_token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "X-GitHub-Api-Version": "2022-11-28",
         }
         
         payload = {
@@ -510,6 +584,8 @@ class CopilotLLM:
             "stream": False,
         }
         
+        logger.debug(f"Calling GitHub Models API with model: {self._github_model_id}")
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 GITHUB_MODELS_API_URL, 
@@ -517,20 +593,27 @@ class CopilotLLM:
                 json=payload, 
                 timeout=aiohttp.ClientTimeout(total=120)
             ) as response:
+                response_text = await response.text()
+                
                 if response.status == 200:
-                    data = await response.json()
+                    data = json.loads(response_text)
                     return data["choices"][0]["message"]["content"]
                 elif response.status == 401:
-                    logger.warning("GitHub Models API returned 401, token may be invalid")
-                    raise Exception("GitHub authentication failed - token may have expired")
+                    logger.warning("GitHub Models API returned 401 - unauthorized")
+                    logger.debug(f"Response: {response_text}")
+                    raise Exception("GitHub authentication failed - ensure you have a valid GitHub token with models access")
                 elif response.status == 403:
-                    raise Exception("GitHub Models API access denied")
+                    logger.warning("GitHub Models API returned 403 - forbidden")
+                    logger.debug(f"Response: {response_text}")
+                    raise Exception("GitHub Models API access denied - you may need to enable GitHub Models in your account settings at https://github.com/settings/copilot")
+                elif response.status == 404:
+                    logger.warning(f"Model not found: {self._github_model_id}")
+                    raise Exception(f"Model '{self._github_model_id}' not found on GitHub Models API")
                 elif response.status == 429:
                     raise Exception("GitHub Models API rate limit exceeded - try again later")
                 else:
-                    error_text = await response.text()
-                    logger.error(f"GitHub Models API error: {response.status} - {error_text}")
-                    raise Exception(f"GitHub Models API error {response.status}: {error_text}")
+                    logger.error(f"GitHub Models API error: {response.status} - {response_text}")
+                    raise Exception(f"GitHub Models API error {response.status}: {response_text}")
     
     async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
         """Stream response from Copilot."""
