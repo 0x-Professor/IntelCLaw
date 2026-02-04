@@ -76,7 +76,7 @@ class WebServer:
         self._app = app
         self.host = host
         self.port = port
-        self.current_model = "gpt-5"
+        self.current_model = "gpt-4o-mini"  # Default to fast, free-tier friendly model
         self.fastapi = FastAPI(
             title="IntelCLaw",
             description="Autonomous AI Agent Web Interface",
@@ -122,25 +122,33 @@ class WebServer:
             """Get available models."""
             return {
                 "models": [
-                    {"id": "gpt-4.1", "name": "GPT-4.1", "provider": "openai"},
+                    # OpenAI Models
+                    {"id": "gpt-4o-mini", "name": "GPT-4o mini (default)", "provider": "openai"},
                     {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai"},
-                    {"id": "gpt-5-mini", "name": "GPT-5 mini", "provider": "openai"},
-                    {"id": "gpt-5", "name": "GPT-5", "provider": "openai"},
-                    {"id": "gpt-5.1", "name": "GPT-5.1", "provider": "openai"},
-                    {"id": "gpt-5.2", "name": "GPT-5.2", "provider": "openai"},
-                    {"id": "gpt-5-codex", "name": "GPT-5-Codex", "provider": "openai"},
-                    {"id": "gpt-5.1-codex", "name": "GPT-5.1-Codex", "provider": "openai"},
-                    {"id": "gpt-5.1-codex-max", "name": "GPT-5.1-Codex-Max", "provider": "openai"},
-                    {"id": "gpt-5.1-codex-mini", "name": "GPT-5.1-Codex-Mini", "provider": "openai"},
-                    {"id": "claude-haiku-4.5", "name": "Claude Haiku 4.5", "provider": "anthropic"},
-                    {"id": "claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "anthropic"},
-                    {"id": "claude-sonnet-4.5", "name": "Claude Sonnet 4.5", "provider": "anthropic"},
-                    {"id": "claude-opus-4.5", "name": "Claude Opus 4.5", "provider": "anthropic"},
-                    {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "google"},
-                    {"id": "gemini-3-flash", "name": "Gemini 3 Flash", "provider": "google"},
-                    {"id": "gemini-3-pro", "name": "Gemini 3 Pro", "provider": "google"},
-                    {"id": "grok-code-fast-1", "name": "Grok Code Fast 1", "provider": "xai"},
-                    {"id": "raptor-mini", "name": "Raptor mini", "provider": "other"}
+                    {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "provider": "openai"},
+                    {"id": "gpt-4", "name": "GPT-4", "provider": "openai"},
+                    {"id": "o1-preview", "name": "o1-preview", "provider": "openai"},
+                    {"id": "o1-mini", "name": "o1-mini", "provider": "openai"},
+                    # Meta Llama Models
+                    {"id": "llama-3.3-70b", "name": "Llama 3.3 70B", "provider": "meta"},
+                    {"id": "llama-3.2-90b", "name": "Llama 3.2 90B Vision", "provider": "meta"},
+                    {"id": "llama-3.1-405b", "name": "Llama 3.1 405B", "provider": "meta"},
+                    {"id": "llama-3.1-70b", "name": "Llama 3.1 70B", "provider": "meta"},
+                    {"id": "llama-3.1-8b", "name": "Llama 3.1 8B", "provider": "meta"},
+                    # Mistral Models
+                    {"id": "mistral-large", "name": "Mistral Large", "provider": "mistral"},
+                    {"id": "mistral-small", "name": "Mistral Small", "provider": "mistral"},
+                    {"id": "mistral-nemo", "name": "Mistral Nemo", "provider": "mistral"},
+                    # DeepSeek Models
+                    {"id": "deepseek-r1", "name": "DeepSeek R1", "provider": "deepseek"},
+                    {"id": "deepseek-v3", "name": "DeepSeek V3", "provider": "deepseek"},
+                    # Microsoft Phi Models
+                    {"id": "phi-4", "name": "Phi-4", "provider": "microsoft"},
+                    {"id": "phi-3.5-moe", "name": "Phi-3.5 MoE", "provider": "microsoft"},
+                    {"id": "phi-3.5-mini", "name": "Phi-3.5 Mini", "provider": "microsoft"},
+                    # Cohere Models
+                    {"id": "cohere-command-r", "name": "Command R", "provider": "cohere"},
+                    {"id": "cohere-command-r-plus", "name": "Command R+", "provider": "cohere"},
                 ],
                 "current": self.current_model
             }

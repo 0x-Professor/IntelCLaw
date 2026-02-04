@@ -633,7 +633,7 @@ class IntelCLawApp {
      */
     _loadSettings() {
         const defaults = {
-            model: 'gpt-5',
+            model: 'gpt-4o-mini',  // Default to fast, free-tier friendly model
             streaming: true,
             showTools: true,
             sound: false,
