@@ -2,6 +2,7 @@
 IntelCLaw - Autonomous AI Agent for Windows
 
 Main entry point for the IntelCLaw application.
+Inspired by OpenClaw (https://docs.openclaw.ai)
 """
 
 import asyncio
