@@ -88,6 +88,9 @@ class CodingAgent(BaseAgent):
         self.clear_thoughts()
         self.status = AgentStatus.THINKING
         
+        # Ensure LLM is initialized
+        await self._ensure_llm()
+        
         try:
             # Detect language from context
             language = self._detect_language(context)

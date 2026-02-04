@@ -88,6 +88,9 @@ class SystemAgent(BaseAgent):
         self.clear_thoughts()
         self.status = AgentStatus.THINKING
         
+        # Ensure LLM is initialized
+        await self._ensure_llm()
+        
         try:
             # Check for sensitive operations
             is_sensitive = self._is_sensitive_operation(context.user_message)
