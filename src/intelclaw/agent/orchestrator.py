@@ -512,13 +512,23 @@ Be security-conscious - ask for confirmation for sensitive operations.
         if context.get("screen_text"):
             sections.append(f"Visible Text: {context['screen_text'][:500]}...\n")
         
+        # User preferences (from Mem0 and context)
         if context.get("user_preferences"):
             prefs = context["user_preferences"]
-            sections.append(f"User Preferences: {prefs}\n")
+            sections.append("### User Preferences (remembered from past interactions)\n")
+            if isinstance(prefs, dict):
+                if prefs.get("mem0_preferences"):
+                    sections.append(prefs["mem0_preferences"])
+                    sections.append("\n")
+                for k, v in prefs.items():
+                    if k != "mem0_preferences":
+                        sections.append(f"- {k}: {v}\n")
+            else:
+                sections.append(f"{prefs}\n")
         
         # Add RAG context if query is provided
         if context.get("rag_context"):
-            sections.append("## Retrieved Context (from memory)\n")
+            sections.append("## Retrieved Context (from persona and memory)\n")
             sections.append(context["rag_context"])
             sections.append("\n")
         
@@ -565,16 +575,29 @@ Be security-conscious - ask for confirmation for sensitive operations.
                 logger.info(f"Delegating to {delegation.agent_name}")
                 return await sub_agent.process(context)
         
-        # Retrieve RAG context for better response quality
+        # PRIORITY 1: First search persona files and vector memory for relevant data
+        # This implements the persona-first retrieval strategy
         rag_context = ""
+        user_preferences_context = ""
+        
         if self.memory and hasattr(self.memory, 'get_rag_context'):
             try:
+                # Get context from persona files and vector store
                 rag_context = await self.memory.get_rag_context(
                     query=context.user_message,
-                    include_persona=False,  # Persona already loaded in system prompt
+                    include_persona=True,  # Prioritize persona files first
                     include_session=True,
                     max_context_chars=5000
                 )
+                
+                # Also get user preferences from Mem0
+                if hasattr(self.memory, 'agentic_rag') and self.memory.agentic_rag:
+                    prefs = await self.memory.agentic_rag.get_user_preferences(context.user_message)
+                    if prefs:
+                        user_preferences_context = "\n".join([
+                            f"- {p.get('content', '')}" for p in prefs[:5]
+                        ])
+                        
             except Exception as e:
                 logger.warning(f"Failed to get RAG context: {e}")
         
@@ -584,13 +607,18 @@ Be security-conscious - ask for confirmation for sensitive operations.
         # Add conversation history
         history_messages = self._conversation_history[-self._max_history:]
         
+        # Combine user preferences from context and Mem0
+        combined_preferences = context.user_preferences or {}
+        if user_preferences_context:
+            combined_preferences["mem0_preferences"] = user_preferences_context
+        
         initial_state: AgentState = {
             "messages": history_messages + [user_message],
             "context": {
                 "screen_text": context.screen_context.get("text") if context.screen_context else None,
                 "active_window": context.active_window,
-                "user_preferences": context.user_preferences,
-                "rag_context": rag_context,  # Add RAG context
+                "user_preferences": combined_preferences,
+                "rag_context": rag_context,  # Add RAG context (persona + vector + mem0)
             },
             "thoughts": [],
             "tools_used": [],
@@ -657,6 +685,13 @@ Be security-conscious - ask for confirmation for sensitive operations.
                         )
                     except Exception as e:
                         logger.warning(f"Failed to store RAG session: {e}")
+                
+                # Extract and store user preferences from conversation
+                # This enables the agent to remember user preferences
+                await self._extract_and_store_preferences(
+                    user_message=context.user_message,
+                    agent_response=answer
+                )
             
             self.status = AgentStatus.IDLE
             
@@ -787,3 +822,53 @@ Be security-conscious - ask for confirmation for sensitive operations.
                 "available_providers": self._llm_provider.available_providers,
             }
         return {"provider": "unknown", "model": self.MODEL_NAME}
+    
+    async def _extract_and_store_preferences(
+        self,
+        user_message: str,
+        agent_response: str
+    ) -> None:
+        """
+        Extract user preferences from conversation and store in Mem0.
+        
+        This enables the agent to learn and remember:
+        - User's preferred coding style, language preferences
+        - Common tools and workflows the user uses
+        - User's communication preferences
+        - Important information shared by the user
+        """
+        if not self.memory or not hasattr(self.memory, 'agentic_rag'):
+            return
+        
+        rag = self.memory.agentic_rag
+        if not rag or not rag._mem0:
+            return
+        
+        # Keywords that indicate user preferences
+        preference_indicators = [
+            "i prefer", "i like", "always use", "i want", "my favorite",
+            "i usually", "i always", "please use", "don't use", "never use",
+            "i work with", "my name is", "call me", "i'm a", "i am a",
+            "my project", "i code in", "my style", "i need"
+        ]
+        
+        message_lower = user_message.lower()
+        
+        # Check if message contains preference indicators
+        for indicator in preference_indicators:
+            if indicator in message_lower:
+                # Store this as a user preference
+                try:
+                    await rag._mem0_add(
+                        f"User stated: {user_message}",
+                        metadata={
+                            "type": "user_preference",
+                            "indicator": indicator,
+                            "timestamp": datetime.now().isoformat(),
+                            "context": agent_response[:200]  # Include some response context
+                        }
+                    )
+                    logger.debug(f"Stored user preference (indicator: {indicator})")
+                except Exception as e:
+                    logger.debug(f"Failed to store preference: {e}")
+                break  # Only store once per message

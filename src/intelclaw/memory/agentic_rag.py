@@ -10,10 +10,12 @@ Key features:
 - Reasoning-based retrieval (LLM decides relevance, not vector similarity)
 - Session and persona persistence
 - Context-aware retrieval with multiple search strategies
+- Mem0 Platform integration for user preferences and infinite memory
 """
 
 import asyncio
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -21,11 +23,20 @@ from uuid import uuid4
 
 from loguru import logger
 
+# Try to import Mem0 - supports both local and platform API
 try:
-    from mem0 import Memory
-    MEM0_AVAILABLE = True
+    from mem0 import MemoryClient  # Platform API (uses MEM0_API_KEY)
+    MEM0_PLATFORM_AVAILABLE = True
 except ImportError:
-    MEM0_AVAILABLE = False
+    MEM0_PLATFORM_AVAILABLE = False
+
+try:
+    from mem0 import Memory  # Local memory (requires OpenAI key)
+    MEM0_LOCAL_AVAILABLE = True
+except ImportError:
+    MEM0_LOCAL_AVAILABLE = False
+
+MEM0_AVAILABLE = MEM0_PLATFORM_AVAILABLE or MEM0_LOCAL_AVAILABLE
 
 
 class DocumentNode:
@@ -236,6 +247,7 @@ class AgenticRAG:
         self._vector_store: Optional[Any] = None
         
         self._initialized = False
+        self._mem0_is_platform = False  # Track if using Platform API
         
         logger.debug("AgenticRAG created")
     
@@ -248,8 +260,21 @@ class AgenticRAG:
         # Load persisted document trees
         await self._load_trees()
         
-        # Initialize Mem0 for infinite memory
-        if MEM0_AVAILABLE:
+        # Initialize Mem0 for infinite memory and user preferences
+        # Priority: 1) Platform API (MEM0_API_KEY), 2) Local with OpenAI
+        mem0_api_key = os.environ.get("MEM0_API_KEY")
+        
+        if mem0_api_key and MEM0_PLATFORM_AVAILABLE:
+            # Use Mem0 Platform API (cloud-based, no OpenAI key needed)
+            try:
+                self._mem0 = MemoryClient(api_key=mem0_api_key)
+                self._mem0_is_platform = True
+                logger.success("Mem0 Platform API initialized (cloud memory enabled)")
+            except Exception as e:
+                logger.warning(f"Mem0 Platform initialization failed: {e}")
+        
+        elif MEM0_LOCAL_AVAILABLE:
+            # Fallback to local Mem0 (requires OpenAI key)
             try:
                 mem0_config = config.get("mem0", {})
                 
@@ -279,10 +304,11 @@ class AgenticRAG:
                 }
                 
                 self._mem0 = Memory.from_config(mem0_settings)
-                logger.info("Mem0 initialized for Agentic RAG")
+                self._mem0_is_platform = False
+                logger.info("Mem0 Local initialized for Agentic RAG")
                 
             except Exception as e:
-                logger.warning(f"Mem0 initialization failed: {e}")
+                logger.warning(f"Mem0 Local initialization failed: {e}")
         
         # Initialize ChromaDB fallback
         try:
@@ -307,8 +333,164 @@ class AgenticRAG:
         await self._save_trees()
         self._initialized = False
     
-    # ==================== Document Tree Operations ====================
+    # ==================== Mem0 Helper Methods ====================
     
+    async def _mem0_add(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Add content to Mem0 (works with both Platform and Local API)."""
+        if not self._mem0:
+            return
+        
+        try:
+            if self._mem0_is_platform:
+                # Platform API: add(messages, user_id, metadata)
+                await asyncio.to_thread(
+                    self._mem0.add,
+                    content,
+                    user_id=self.user_id,
+                    metadata=metadata or {}
+                )
+            else:
+                # Local API: add(data, user_id, metadata)
+                await asyncio.to_thread(
+                    self._mem0.add,
+                    content,
+                    user_id=self.user_id,
+                    metadata=metadata or {}
+                )
+        except Exception as e:
+            logger.debug(f"Mem0 add failed: {e}")
+    
+    async def _mem0_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Search Mem0 (works with both Platform and Local API)."""
+        if not self._mem0:
+            return []
+        
+        try:
+            if self._mem0_is_platform:
+                # Platform API returns list directly
+                results = await asyncio.to_thread(
+                    self._mem0.search,
+                    query,
+                    user_id=self.user_id,
+                    limit=limit
+                )
+                # Platform API returns list of memory objects
+                if isinstance(results, list):
+                    return [
+                        {
+                            "id": r.get("id", str(uuid4())),
+                            "content": r.get("memory", ""),
+                            "score": r.get("score", 0.5),
+                            "source": "mem0",
+                            "metadata": r.get("metadata", {})
+                        }
+                        for r in results
+                    ]
+            else:
+                # Local API returns dict with 'results' key
+                results = await asyncio.to_thread(
+                    self._mem0.search,
+                    query,
+                    user_id=self.user_id,
+                    limit=limit
+                )
+                results_list = results.get("results", []) if isinstance(results, dict) else results
+                return [
+                    {
+                        "id": r.get("id", str(uuid4())),
+                        "content": r.get("memory", r.get("text", "")),
+                        "score": r.get("score", 0.5),
+                        "source": "mem0",
+                        "metadata": r.get("metadata", {})
+                    }
+                    for r in results_list
+                ]
+        except Exception as e:
+            logger.debug(f"Mem0 search failed: {e}")
+        
+        return []
+    
+    async def store_user_preference(
+        self,
+        preference_type: str,
+        preference_value: str,
+        context: Optional[str] = None
+    ) -> None:
+        """
+        Store user preference in Mem0 for future reference.
+        
+        This is used to remember user preferences, habits, and important
+        information that should persist across sessions.
+        
+        Args:
+            preference_type: Type of preference (e.g., 'coding_style', 'language', 'tool')
+            preference_value: The preference value
+            context: Additional context about when/why this preference was learned
+        """
+        if not self._mem0:
+            # Fallback: store in local file
+            prefs_file = self.persist_dir / "user_preferences.json"
+            prefs = {}
+            if prefs_file.exists():
+                prefs = json.loads(prefs_file.read_text())
+            
+            prefs[preference_type] = {
+                "value": preference_value,
+                "context": context,
+                "timestamp": datetime.now().isoformat()
+            }
+            prefs_file.write_text(json.dumps(prefs, indent=2))
+            logger.info(f"Stored user preference locally: {preference_type}")
+            return
+        
+        # Store in Mem0
+        memory_content = f"User preference - {preference_type}: {preference_value}"
+        if context:
+            memory_content += f"\nContext: {context}"
+        
+        await self._mem0_add(
+            memory_content,
+            metadata={
+                "type": "user_preference",
+                "preference_type": preference_type,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        logger.info(f"Stored user preference in Mem0: {preference_type}")
+    
+    async def get_user_preferences(self, query: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Retrieve user preferences from Mem0.
+        
+        Args:
+            query: Optional query to filter preferences
+            
+        Returns:
+            List of relevant user preferences
+        """
+        if not self._mem0:
+            # Fallback: read from local file
+            prefs_file = self.persist_dir / "user_preferences.json"
+            if prefs_file.exists():
+                prefs = json.loads(prefs_file.read_text())
+                return [{"type": k, **v} for k, v in prefs.items()]
+            return []
+        
+        # Search Mem0 for preferences
+        search_query = query or "user preference"
+        results = await self._mem0_search(search_query, limit=20)
+        
+        # Filter for preference-type memories
+        preferences = [
+            r for r in results
+            if r.get("metadata", {}).get("type") == "user_preference"
+            or "preference" in r.get("content", "").lower()
+        ]
+        
+        return preferences
+
+    # ==================== Document Tree Operations ====================
+
     async def index_document(
         self,
         doc_id: str,
@@ -341,16 +523,10 @@ class AgenticRAG:
         self.document_trees[doc_id] = tree
         
         # Also add to Mem0 for semantic backup
-        if self._mem0:
-            try:
-                await asyncio.to_thread(
-                    self._mem0.add,
-                    f"Document: {title}\n\n{content[:5000]}",
-                    user_id=self.user_id,
-                    metadata={"doc_id": doc_id, "type": doc_type}
-                )
-            except Exception as e:
-                logger.warning(f"Failed to add to Mem0: {e}")
+        await self._mem0_add(
+            f"Document: {title}\n\n{content[:5000]}",
+            metadata={"doc_id": doc_id, "type": doc_type}
+        )
         
         # Persist
         await self._save_trees()
@@ -475,26 +651,12 @@ class AgenticRAG:
                 if r.get("id") not in seen_ids:
                     results.append(r)
         
-        # Search Mem0 memories
-        if self._mem0:
-            try:
-                mem0_results = await asyncio.to_thread(
-                    self._mem0.search,
-                    query,
-                    user_id=self.user_id,
-                    limit=max_results
-                )
-                
-                for r in (mem0_results.get("results", []) if isinstance(mem0_results, dict) else mem0_results):
-                    results.append({
-                        "id": r.get("id", str(uuid4())),
-                        "content": r.get("memory", r.get("text", "")),
-                        "score": r.get("score", 0.5),
-                        "source": "mem0",
-                        "metadata": r.get("metadata", {})
-                    })
-            except Exception as e:
-                logger.warning(f"Mem0 search failed: {e}")
+        # Search Mem0 memories (user preferences and facts)
+        mem0_results = await self._mem0_search(query, limit=max_results)
+        seen_ids = {r.get("id") for r in results}
+        for r in mem0_results:
+            if r.get("id") not in seen_ids:
+                results.append(r)
         
         # Sort by score and limit
         results.sort(key=lambda x: x.get("score", 0), reverse=True)
@@ -617,23 +779,16 @@ class AgenticRAG:
         self.session_memories.append(session_data)
         
         # Extract and store facts in Mem0
-        if self._mem0:
-            try:
-                # Combine messages for fact extraction
-                conversation = "\n".join([
-                    f"{m.get('role', 'unknown')}: {m.get('content', '')}"
-                    for m in messages[-10:]  # Last 10 messages
-                ])
-                
-                await asyncio.to_thread(
-                    self._mem0.add,
-                    conversation,
-                    user_id=self.user_id,
-                    metadata={"type": "session", "session_id": session_id}
-                )
-                
-            except Exception as e:
-                logger.warning(f"Failed to store session in Mem0: {e}")
+        # Combine messages for fact extraction
+        conversation = "\n".join([
+            f"{m.get('role', 'unknown')}: {m.get('content', '')}"
+            for m in messages[-10:]  # Last 10 messages
+        ])
+        
+        await self._mem0_add(
+            conversation,
+            metadata={"type": "session", "session_id": session_id}
+        )
         
         # Save to disk
         session_file = self.persist_dir / "sessions" / f"{session_id}.json"
