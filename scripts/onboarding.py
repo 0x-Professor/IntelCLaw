@@ -412,19 +412,36 @@ async def test_configuration(api_keys: dict):
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        # Test OpenAI
-        task = progress.add_task("Testing OpenAI connection...", total=None)
-        try:
-            import openai
-            client = openai.OpenAI(api_key=api_keys.get("OPENAI_API_KEY", ""))
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": "Say 'IntelCLaw ready!' in 3 words or less"}],
-                max_tokens=10
-            )
-            progress.update(task, description="[green]✓ OpenAI connected[/green]")
-        except Exception as e:
-            progress.update(task, description=f"[red]✗ OpenAI error: {e}[/red]")
+        
+        # Test Copilot or OpenAI based on configuration
+        if api_keys.get("USE_COPILOT") == "true":
+            task = progress.add_task("Testing GitHub Copilot connection...", total=None)
+            try:
+                # Check if user is logged into GitHub
+                import subprocess
+                result = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    progress.update(task, description="[green]✓ GitHub CLI authenticated[/green]")
+                else:
+                    progress.update(task, description="[yellow]⚠ GitHub CLI not authenticated - run 'gh auth login'[/yellow]")
+            except FileNotFoundError:
+                progress.update(task, description="[yellow]⚠ GitHub CLI not installed - Copilot will use VS Code token[/yellow]")
+            except Exception as e:
+                progress.update(task, description=f"[yellow]⚠ Could not verify GitHub auth: {e}[/yellow]")
+        
+        elif api_keys.get("OPENAI_API_KEY"):
+            task = progress.add_task("Testing OpenAI connection...", total=None)
+            try:
+                import openai
+                client = openai.OpenAI(api_key=api_keys.get("OPENAI_API_KEY", ""))
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": "Say 'IntelCLaw ready!' in 3 words or less"}],
+                    max_tokens=10
+                )
+                progress.update(task, description="[green]✓ OpenAI connected[/green]")
+            except Exception as e:
+                progress.update(task, description=f"[red]✗ OpenAI error: {e}[/red]")
         
         # Test Tavily
         if api_keys.get("TAVILY_API_KEY"):
