@@ -533,19 +533,24 @@ class CopilotLLM:
             return CopilotResponse(content=f"Error calling Copilot: {e}")
     
     async def _call_copilot_api(self, messages: List[Dict[str, str]]) -> str:
-        """Call the GitHub Copilot API."""
+        """Call the GitHub Copilot API using the exchanged Copilot token."""
         import aiohttp
         
-        # GitHub Copilot Chat API endpoint
-        api_url = "https://api.githubcopilot.com/chat/completions"
+        # Ensure token is valid
+        if not await self._ensure_valid_token():
+            raise Exception("Copilot token expired and could not be refreshed")
+        
+        # Use the dynamically determined base URL
+        api_url = f"{self._copilot_base_url}/chat/completions"
         
         headers = {
             "Authorization": f"Bearer {self._copilot_token}",
             "Content-Type": "application/json",
-            "Editor-Version": "vscode/1.85.0",
-            "Editor-Plugin-Version": "copilot-chat/0.12.0",
-            "Openai-Organization": "github-copilot",
-            "User-Agent": "GitHubCopilotChat/0.12.0",
+            "Accept": "application/json",
+            "Editor-Version": "vscode/1.96.0",
+            "Editor-Plugin-Version": "copilot-chat/0.26.0",
+            "User-Agent": "GitHubCopilotChat/0.26.0",
+            "X-Request-Id": str(time.time_ns()),
         }
         
         payload = {
@@ -557,14 +562,19 @@ class CopilotLLM:
         }
         
         async with aiohttp.ClientSession() as session:
-            async with session.post(api_url, headers=headers, json=payload) as response:
+            async with session.post(api_url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as response:
                 if response.status == 200:
                     data = await response.json()
                     return data["choices"][0]["message"]["content"]
                 elif response.status == 401:
-                    raise Exception("Copilot authentication failed - please ensure you're logged into GitHub Copilot")
+                    # Token might be expired, try to refresh
+                    logger.warning("Copilot returned 401, token may be invalid")
+                    raise Exception("Copilot authentication failed - token may have expired")
+                elif response.status == 403:
+                    raise Exception("Copilot access denied - ensure you have an active Copilot subscription")
                 else:
                     error_text = await response.text()
+                    logger.error(f"Copilot API error: {response.status} - {error_text}")
                     raise Exception(f"Copilot API error {response.status}: {error_text}")
     
     async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
