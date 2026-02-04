@@ -3,6 +3,10 @@ GitHub Copilot LLM Provider - Use Copilot as the LLM backend.
 
 This module enables IntelCLaw to use GitHub Copilot's language models
 directly through VS Code's Copilot extension API.
+
+Key insight from OpenClaw: GitHub OAuth tokens must be EXCHANGED for
+Copilot API tokens at https://api.github.com/copilot_internal/v2/token
+before they can be used with the Copilot chat API.
 """
 
 import asyncio
@@ -11,14 +15,51 @@ import os
 import subprocess
 import webbrowser
 import time
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, AsyncIterator
 
 from loguru import logger
 
 
-# GitHub OAuth App Client ID for Copilot
-GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"  # VS Code GitHub Copilot client ID
+# GitHub OAuth App Client ID for Copilot (same as VS Code uses)
+GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
+
+# Copilot API Token Exchange URL (the key discovery from OpenClaw!)
+COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token"
+
+# Default Copilot API Base URL
+DEFAULT_COPILOT_API_BASE_URL = "https://api.individual.githubcopilot.com"
+
+
+def derive_copilot_base_url_from_token(token: str) -> Optional[str]:
+    """
+    Extract the API base URL from a Copilot token.
+    
+    The Copilot token contains a proxy-ep field that determines
+    the correct API endpoint to use.
+    
+    Example: token;proxy-ep=proxy.individual.githubcopilot.com; 
+             -> https://api.individual.githubcopilot.com
+    """
+    trimmed = token.strip()
+    if not trimmed:
+        return None
+    
+    # The token is semicolon-delimited with key=value pairs
+    match = re.search(r'(?:^|;)\s*proxy-ep=([^;\s]+)', trimmed, re.IGNORECASE)
+    if not match:
+        return None
+    
+    proxy_ep = match.group(1).strip()
+    if not proxy_ep:
+        return None
+    
+    # Convert proxy.* to api.* (as OpenClaw does)
+    host = re.sub(r'^https?://', '', proxy_ep)
+    host = re.sub(r'^proxy\.', 'api.', host, flags=re.IGNORECASE)
+    
+    return f"https://{host}" if host else None
 
 
 class GitHubAuth:
@@ -27,9 +68,14 @@ class GitHubAuth:
     
     This allows users to authenticate with GitHub to use Copilot
     without needing to manually copy tokens.
+    
+    Token flow (based on OpenClaw):
+    1. GitHub Device Flow -> GitHub OAuth token (read:user scope)
+    2. Exchange at /copilot_internal/v2/token -> Copilot API token
     """
     
     TOKEN_FILE = Path.home() / ".intelclaw" / "github_token.json"
+    COPILOT_TOKEN_FILE = Path.home() / ".intelclaw" / "copilot_token.json"
     
     @classmethod
     async def authenticate(cls) -> Optional[str]:
@@ -182,7 +228,113 @@ class GitHubAuth:
         """Clear saved token."""
         if cls.TOKEN_FILE.exists():
             cls.TOKEN_FILE.unlink()
-            print("✅ GitHub token cleared.")
+        if cls.COPILOT_TOKEN_FILE.exists():
+            cls.COPILOT_TOKEN_FILE.unlink()
+        print("✅ GitHub and Copilot tokens cleared.")
+    
+    @classmethod
+    async def exchange_for_copilot_token(cls, github_token: str) -> Optional[Dict[str, Any]]:
+        """
+        Exchange a GitHub OAuth token for a Copilot API token.
+        
+        This is the key step that makes Copilot API work!
+        Based on OpenClaw's implementation.
+        
+        Args:
+            github_token: GitHub OAuth access token
+            
+        Returns:
+            Dict with 'token', 'expires_at', 'base_url' if successful
+        """
+        import aiohttp
+        
+        # Check for cached Copilot token first
+        cached = cls._load_copilot_token()
+        if cached:
+            # Check if token is still valid (with 5 min buffer)
+            expires_at = cached.get("expires_at", 0)
+            if expires_at - time.time() > 300:  # 5 minutes buffer
+                logger.debug("Using cached Copilot API token")
+                return cached
+        
+        logger.info("Exchanging GitHub token for Copilot API token...")
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    COPILOT_TOKEN_URL,
+                    headers={
+                        "Accept": "application/json",
+                        "Authorization": f"Bearer {github_token}",
+                    }
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"Copilot token exchange failed: {response.status} - {error_text}")
+                        return None
+                    
+                    data = await response.json()
+                    
+                    # Parse response
+                    token = data.get("token")
+                    expires_at = data.get("expires_at")
+                    
+                    if not token:
+                        logger.error("Copilot token response missing 'token' field")
+                        return None
+                    
+                    # Convert expires_at to timestamp (GitHub returns Unix seconds)
+                    if isinstance(expires_at, (int, float)):
+                        # Handle both seconds and milliseconds
+                        if expires_at > 10_000_000_000:
+                            expires_at_ts = expires_at / 1000
+                        else:
+                            expires_at_ts = expires_at
+                    else:
+                        # Default to 1 hour from now
+                        expires_at_ts = time.time() + 3600
+                    
+                    # Derive the API base URL from the token
+                    base_url = derive_copilot_base_url_from_token(token) or DEFAULT_COPILOT_API_BASE_URL
+                    
+                    result = {
+                        "token": token,
+                        "expires_at": expires_at_ts,
+                        "base_url": base_url,
+                        "updated_at": time.time()
+                    }
+                    
+                    # Cache the token
+                    cls._save_copilot_token(result)
+                    
+                    logger.info(f"Copilot token obtained, expires at {time.ctime(expires_at_ts)}")
+                    logger.info(f"API base URL: {base_url}")
+                    
+                    return result
+                    
+        except Exception as e:
+            logger.error(f"Copilot token exchange error: {e}")
+            return None
+    
+    @classmethod
+    def _save_copilot_token(cls, token_data: Dict[str, Any]) -> None:
+        """Save Copilot token to file."""
+        cls.COPILOT_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        cls.COPILOT_TOKEN_FILE.write_text(json.dumps(token_data), encoding="utf-8")
+        try:
+            os.chmod(cls.COPILOT_TOKEN_FILE, 0o600)
+        except:
+            pass
+    
+    @classmethod
+    def _load_copilot_token(cls) -> Optional[Dict[str, Any]]:
+        """Load Copilot token from file."""
+        if cls.COPILOT_TOKEN_FILE.exists():
+            try:
+                return json.loads(cls.COPILOT_TOKEN_FILE.read_text(encoding="utf-8"))
+            except Exception as e:
+                logger.debug(f"Could not load cached Copilot token: {e}")
+        return None
 
 
 class CopilotLLM:
@@ -191,6 +343,10 @@ class CopilotLLM:
     
     This allows IntelCLaw to leverage your existing GitHub Copilot
     subscription without needing separate API keys.
+    
+    Uses the two-step token flow:
+    1. GitHub OAuth token (from device flow)
+    2. Copilot API token (exchanged at /copilot_internal/v2/token)
     """
     
     def __init__(self, model: str = "gpt-4o"):
@@ -202,26 +358,65 @@ class CopilotLLM:
         """
         self.model = model
         self._initialized = False
+        self._github_token: Optional[str] = None
         self._copilot_token: Optional[str] = None
+        self._copilot_base_url: str = DEFAULT_COPILOT_API_BASE_URL
+        self._token_expires_at: float = 0
         self._session_id: Optional[str] = None
     
     async def initialize(self) -> bool:
         """Initialize connection to Copilot."""
-        # Try to get Copilot token from various sources
-        token = await self._get_copilot_token()
-        if token:
-            self._copilot_token = token
-            self._initialized = True
-            logger.info(f"Copilot LLM initialized with model: {self.model}")
-            return True
+        # Step 1: Get GitHub OAuth token
+        github_token = await self._get_github_token()
+        if not github_token:
+            logger.warning("Could not get GitHub OAuth token")
+            return False
         
-        logger.warning("Could not initialize Copilot LLM - token not found")
-        return False
+        self._github_token = github_token
+        
+        # Step 2: Exchange for Copilot API token
+        copilot_data = await GitHubAuth.exchange_for_copilot_token(github_token)
+        if not copilot_data:
+            logger.warning("Could not exchange GitHub token for Copilot API token")
+            logger.warning("Make sure you have an active GitHub Copilot subscription")
+            return False
+        
+        self._copilot_token = copilot_data["token"]
+        self._copilot_base_url = copilot_data.get("base_url", DEFAULT_COPILOT_API_BASE_URL)
+        self._token_expires_at = copilot_data.get("expires_at", 0)
+        
+        self._initialized = True
+        logger.info(f"Copilot LLM initialized with model: {self.model}")
+        logger.info(f"API endpoint: {self._copilot_base_url}")
+        return True
     
-    async def _get_copilot_token(self) -> Optional[str]:
-        """Get GitHub Copilot token from various sources."""
-        # 1. Check environment variable first
-        token = os.environ.get("GITHUB_COPILOT_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    async def _ensure_valid_token(self) -> bool:
+        """Ensure the Copilot API token is still valid, refresh if needed."""
+        if not self._copilot_token:
+            return False
+        
+        # Check if token is expiring soon (5 min buffer)
+        if time.time() > self._token_expires_at - 300:
+            logger.info("Copilot token expiring, refreshing...")
+            if self._github_token:
+                copilot_data = await GitHubAuth.exchange_for_copilot_token(self._github_token)
+                if copilot_data:
+                    self._copilot_token = copilot_data["token"]
+                    self._copilot_base_url = copilot_data.get("base_url", DEFAULT_COPILOT_API_BASE_URL)
+                    self._token_expires_at = copilot_data.get("expires_at", 0)
+                    return True
+            return False
+        
+        return True
+    
+    async def _get_github_token(self) -> Optional[str]:
+        """Get GitHub OAuth token from various sources."""
+        # 1. Check environment variable first (COPILOT_GITHUB_TOKEN preferred, like OpenClaw)
+        token = (
+            os.environ.get("COPILOT_GITHUB_TOKEN") or 
+            os.environ.get("GH_TOKEN") or 
+            os.environ.get("GITHUB_TOKEN")
+        )
         if token:
             logger.debug("Using token from environment variable")
             return token
@@ -275,12 +470,12 @@ class CopilotLLM:
         logger.info("No GitHub token found, starting interactive authentication...")
         return await GitHubAuth.authenticate()
     
-    async def ainvoke(self, prompt: str, **kwargs) -> "CopilotResponse":
+    async def ainvoke(self, input_data, **kwargs) -> "CopilotResponse":
         """
         Invoke the Copilot LLM.
         
         Args:
-            prompt: The prompt to send
+            input_data: Can be a string prompt or list of LangChain messages
             **kwargs: Additional parameters
             
         Returns:
@@ -289,10 +484,45 @@ class CopilotLLM:
         if not self._initialized:
             await self.initialize()
         
-        # Use the Copilot API endpoint
-        messages = kwargs.get("messages", [])
-        if not messages:
-            messages = [{"role": "user", "content": prompt}]
+        # Convert input to messages format
+        messages = []
+        
+        # Check if input is LangChain messages (list of message objects)
+        if isinstance(input_data, list):
+            for msg in input_data:
+                if hasattr(msg, 'content'):
+                    # It's a LangChain message object
+                    role = "user"
+                    if msg.__class__.__name__ == "SystemMessage":
+                        role = "system"
+                    elif msg.__class__.__name__ == "AIMessage":
+                        role = "assistant"
+                    elif msg.__class__.__name__ == "HumanMessage":
+                        role = "user"
+                    messages.append({"role": role, "content": msg.content})
+                elif isinstance(msg, dict):
+                    messages.append(msg)
+        elif isinstance(input_data, str):
+            messages = [{"role": "user", "content": input_data}]
+        else:
+            # Try to get content from object
+            if hasattr(input_data, 'content'):
+                messages = [{"role": "user", "content": input_data.content}]
+            else:
+                messages = [{"role": "user", "content": str(input_data)}]
+        
+        # Add any additional messages from kwargs
+        if "messages" in kwargs:
+            for msg in kwargs["messages"]:
+                if isinstance(msg, dict):
+                    messages.append(msg)
+                elif hasattr(msg, 'content'):
+                    role = "user"
+                    if msg.__class__.__name__ == "SystemMessage":
+                        role = "system"
+                    elif msg.__class__.__name__ == "AIMessage":
+                        role = "assistant"
+                    messages.append({"role": role, "content": msg.content})
         
         try:
             response = await self._call_copilot_api(messages)
