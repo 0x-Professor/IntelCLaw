@@ -482,11 +482,10 @@ class CopilotLLM:
     
     async def initialize(self) -> bool:
         """
-        Initialize connection to GitHub Copilot or Models API.
+        Initialize connection to GitHub Copilot API.
         
-        Priority (like OpenClaw):
-        1. Try to get Copilot API access (requires subscription)
-        2. Fall back to GitHub Models API (free, rate-limited)
+        This uses GitHub Copilot subscription models exclusively.
+        No fallback to free GitHub Models API.
         """
         # Get GitHub OAuth token
         github_token = await self._get_github_token()
@@ -497,50 +496,18 @@ class CopilotLLM:
         self._github_token = github_token
         self._session_id = str(time.time_ns())
         
-        # Try to get Copilot API token if enabled
-        if self._use_copilot_api:
-            copilot_result = await self._get_copilot_token(github_token)
-            if copilot_result:
-                self._copilot_token = copilot_result["token"]
-                self._copilot_token_expires_at = copilot_result.get("expires_at")
-                self._copilot_base_url = copilot_result.get("base_url", DEFAULT_COPILOT_API_BASE_URL)
-                logger.info(f"GitHub Copilot API initialized (base: {self._copilot_base_url})")
-                logger.info(f"Using Copilot model: {self.model}")
-                self._initialized = True
-                
-                # Initialize Anthropic fallback if API key is available
-                await self._init_anthropic_fallback()
-                return True
-            else:
-                logger.info("Copilot API not available, falling back to GitHub Models API")
-        
-        # Fall back to GitHub Models API
-        try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    "https://api.github.com/user",
-                    headers={
-                        "Authorization": f"Bearer {github_token}",
-                        "Accept": "application/json",
-                        "X-GitHub-Api-Version": "2022-11-28"
-                    }
-                ) as response:
-                    if response.status == 200:
-                        user_data = await response.json()
-                        logger.info(f"GitHub Models API initialized for user: {user_data.get('login', 'unknown')}")
-                        logger.info(f"Using model: {self._github_model_id} (default: {DEFAULT_MODEL})")
-                        self._initialized = True
-                        
-                        # Initialize Anthropic fallback if API key is available
-                        await self._init_anthropic_fallback()
-                        
-                        return True
-                    else:
-                        logger.warning(f"GitHub token validation failed: {response.status}")
-                        return False
-        except Exception as e:
-            logger.error(f"Error validating GitHub token: {e}")
+        # Get Copilot API token (required - no fallback)
+        copilot_result = await self._get_copilot_token(github_token)
+        if copilot_result:
+            self._copilot_token = copilot_result["token"]
+            self._copilot_token_expires_at = copilot_result.get("expires_at")
+            self._copilot_base_url = copilot_result.get("base_url", DEFAULT_COPILOT_API_BASE_URL)
+            logger.info(f"GitHub Copilot API initialized (base: {self._copilot_base_url})")
+            logger.info(f"Using Copilot model: {self.model}")
+            self._initialized = True
+            return True
+        else:
+            logger.error("Could not get Copilot API token. Make sure you have an active GitHub Copilot subscription.")
             return False
     
     async def _get_copilot_token(self, github_token: str) -> Optional[Dict[str, Any]]:
@@ -1230,12 +1197,9 @@ class CopilotResponse:
 
 class LLMProvider:
     """
-    Unified LLM provider that can use Copilot or direct APIs.
+    LLM provider that uses GitHub Copilot API exclusively.
     
-    Priority:
-    1. GitHub Copilot (if available)
-    2. OpenAI API (if key provided)
-    3. Anthropic API (if key provided)
+    Uses GitHub Copilot subscription models only - no fallback to other providers.
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -1245,49 +1209,17 @@ class LLMProvider:
         self._provider_name = "none"
     
     async def initialize(self) -> bool:
-        """Initialize the best available LLM provider."""
+        """Initialize GitHub Copilot as the LLM provider."""
         
-        # 1. Try GitHub Copilot first (no API key needed)
-        copilot = CopilotLLM(model=self.config.get("model", "gpt-4o-mini"))
+        # Use GitHub Copilot exclusively
+        copilot = CopilotLLM(model=self.config.get("model", "gpt-4o"))
         if await copilot.initialize():
             self._llm = copilot
-            self._provider_name = "copilot"
+            self._provider_name = "github-copilot"
             logger.info("Using GitHub Copilot as LLM provider")
             return True
         
-        # 2. Try OpenAI
-        openai_key = os.environ.get("OPENAI_API_KEY") or self.config.get("openai_api_key")
-        if openai_key:
-            try:
-                from langchain_openai import ChatOpenAI
-                self._llm = ChatOpenAI(
-                    model=self.config.get("model", "gpt-4o"),
-                    api_key=openai_key,
-                    temperature=self.config.get("temperature", 0.1),
-                )
-                self._provider_name = "openai"
-                logger.info("Using OpenAI as LLM provider")
-                return True
-            except Exception as e:
-                logger.warning(f"OpenAI initialization failed: {e}")
-        
-        # 3. Try Anthropic
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY") or self.config.get("anthropic_api_key")
-        if anthropic_key:
-            try:
-                from langchain_anthropic import ChatAnthropic
-                self._llm = ChatAnthropic(
-                    model="claude-3-5-sonnet-20241022",
-                    api_key=anthropic_key,
-                    temperature=self.config.get("temperature", 0.1),
-                )
-                self._provider_name = "anthropic"
-                logger.info("Using Anthropic as LLM provider")
-                return True
-            except Exception as e:
-                logger.warning(f"Anthropic initialization failed: {e}")
-        
-        logger.error("No LLM provider available")
+        logger.error("GitHub Copilot initialization failed. Make sure you have an active subscription.")
         return False
     
     @property
@@ -1304,6 +1236,21 @@ class LLMProvider:
     def active_provider(self) -> str:
         """Get the active provider name."""
         return self._provider_name
+    
+    def set_model(self, model: str) -> None:
+        """
+        Change the model at runtime.
+        
+        Propagates the model change to the underlying LLM provider.
+        
+        Args:
+            model: New model to use (e.g., 'gpt-4o', 'claude-sonnet-4', 'gemini-2.5-pro')
+        """
+        if self._llm and hasattr(self._llm, 'set_model'):
+            self._llm.set_model(model)
+            logger.info(f"LLMProvider: Model changed to {model}")
+        else:
+            logger.warning(f"LLMProvider: Cannot set model - underlying LLM doesn't support set_model")
     
     @property
     def available_providers(self) -> List[str]:

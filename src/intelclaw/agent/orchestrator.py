@@ -149,6 +149,11 @@ class AgentOrchestrator(BaseAgent):
         
         logger.info("AgentOrchestrator shutdown complete")
     
+    def clear_conversation_history(self) -> None:
+        """Clear conversation history. Useful when switching models."""
+        self._conversation_history = []
+        logger.info("Conversation history cleared")
+    
     async def run(self) -> None:
         """Background run loop for the orchestrator."""
         logger.info("AgentOrchestrator run loop started")

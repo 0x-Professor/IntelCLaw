@@ -259,30 +259,48 @@ class WebServer:
             # Update current model
             old_model = self.current_model
             self.current_model = model_id
+            self.current_provider = provider
             
             # Update LLM provider if possible
+            model_updated = False
             try:
-                if self._app and hasattr(self._app, 'agent') and hasattr(self._app.agent, '_llm'):
-                    if hasattr(self._app.agent._llm, 'set_model'):
-                        self._app.agent._llm.set_model(model_id)
-                    if hasattr(self._app.agent._llm, 'set_provider'):
-                        self._app.agent._llm.set_provider(provider)
-                else:
-                    from intelclaw.integrations import llm_provider
-                    if hasattr(llm_provider, 'set_model'):
-                        llm_provider.set_model(model_id)
-                    if hasattr(llm_provider, 'set_provider'):
-                        llm_provider.set_provider(provider)
+                # Try multiple paths to update the model
+                if self._app and hasattr(self._app, 'agent') and self._app.agent:
+                    agent = self._app.agent
+                    
+                    # Try _llm_provider first (most common)
+                    if hasattr(agent, '_llm_provider') and agent._llm_provider:
+                        if hasattr(agent._llm_provider, 'set_model'):
+                            agent._llm_provider.set_model(model_id)
+                            model_updated = True
+                            logger.info(f"Model updated via agent._llm_provider: {model_id}")
+                    
+                    # Try _llm as fallback
+                    if not model_updated and hasattr(agent, '_llm') and agent._llm:
+                        if hasattr(agent._llm, 'set_model'):
+                            agent._llm.set_model(model_id)
+                            model_updated = True
+                            logger.info(f"Model updated via agent._llm: {model_id}")
+                    
+                    # Clear conversation history when switching models
+                    # This prevents model identity confusion
+                    if model_updated and hasattr(agent, 'clear_conversation_history'):
+                        agent.clear_conversation_history()
+                
+                if not model_updated:
+                    logger.warning(f"Could not update LLM model to {model_id} - no provider found")
+                    
             except Exception as e:
                 logger.warning(f"Could not update LLM provider: {e}")
             
-            logger.info(f"Model switched: {old_model} -> {model_id} (provider: {provider})")
+            logger.info(f"Model switched: {old_model} -> {model_id} (provider: {provider}, updated: {model_updated})")
             
             return {
                 "success": True,
                 "model": model_id,
                 "previous": old_model,
-                "provider": provider
+                "provider": provider,
+                "model_updated": model_updated
             }
         
         @self.fastapi.get("/api/tools")
@@ -420,11 +438,23 @@ class WebServer:
         # Update current model if changed
         if model != self.current_model:
             self.current_model = model
-            # Update the LLM model
-            if self._app and self._app.agent and hasattr(self._app.agent, '_llm'):
-                if hasattr(self._app.agent._llm, 'set_model'):
-                    self._app.agent._llm.set_model(model)
-                    logger.info(f"Model changed to: {model}")
+            # Update the LLM model via multiple paths
+            model_updated = False
+            if self._app and self._app.agent:
+                agent = self._app.agent
+                # Try _llm_provider first
+                if hasattr(agent, '_llm_provider') and agent._llm_provider:
+                    if hasattr(agent._llm_provider, 'set_model'):
+                        agent._llm_provider.set_model(model)
+                        model_updated = True
+                # Try _llm as fallback
+                if not model_updated and hasattr(agent, '_llm') and agent._llm:
+                    if hasattr(agent._llm, 'set_model'):
+                        agent._llm.set_model(model)
+                        model_updated = True
+                        
+            if model_updated:
+                logger.info(f"Model changed to: {model}")
         
         # Store user message
         if session_id:
