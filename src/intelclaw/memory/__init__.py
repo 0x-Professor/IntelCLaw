@@ -5,6 +5,7 @@ from intelclaw.memory.short_term import ShortTermMemory
 from intelclaw.memory.working_memory import WorkingMemory
 from intelclaw.memory.long_term import LongTermMemory
 from intelclaw.memory.vector_store import VectorStore
+from intelclaw.memory.data_store import DataStore
 
 __all__ = [
     "MemoryManager",
@@ -12,4 +13,5 @@ __all__ = [
     "WorkingMemory",
     "LongTermMemory",
     "VectorStore",
+    "DataStore",
 ]
