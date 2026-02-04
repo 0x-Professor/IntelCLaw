@@ -793,21 +793,12 @@ class CopilotLLM:
                         role = "assistant"
                     messages.append({"role": role, "content": msg.content})
         
-        # Detect if this is a heavy task (complex reasoning required)
-        is_heavy_task = kwargs.get("heavy_task", False) or self._detect_heavy_task(messages)
-        
         try:
-            # Use Anthropic for heavy tasks if available
-            if is_heavy_task and self._use_anthropic_for_heavy and self._anthropic_fallback:
-                logger.info("Using Anthropic Claude for heavy task")
-                response = await self._call_anthropic_api(messages)
-                return AIMessage(content=response)
+            # Use Copilot API exclusively
+            if not self._copilot_token:
+                raise Exception("Copilot token not available - GitHub Copilot subscription required")
             
-            # Use Copilot API if available, otherwise fall back to GitHub Models API
-            if self._copilot_token:
-                response = await self._call_copilot_api(messages, include_tools=True)
-            else:
-                response = await self._call_github_models_api(messages, include_tools=True)
+            response = await self._call_copilot_api(messages, include_tools=True)
             
             # Build AIMessage with tool_calls if present
             # Note: content can be None when model requests tool calls
@@ -1254,22 +1245,8 @@ class LLMProvider:
     
     @property
     def available_providers(self) -> List[str]:
-        """List potentially available providers."""
-        providers = []
-        
-        # Check Copilot
-        if os.environ.get("GITHUB_COPILOT_TOKEN") or self._provider_name == "copilot":
-            providers.append("copilot")
-        
-        # Check OpenAI
-        if os.environ.get("OPENAI_API_KEY"):
-            providers.append("openai")
-        
-        # Check Anthropic
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            providers.append("anthropic")
-        
-        return providers if providers else ["copilot"]  # Default to copilot attempt
+        """List available providers (GitHub Copilot only)."""
+        return ["github-copilot"]
     
     async def invoke(self, prompt: str, **kwargs) -> str:
         """Invoke the LLM."""
