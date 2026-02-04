@@ -3,6 +3,14 @@ app:
   version: 0.1.0
   debug: false
 
+# User Profile (set via onboarding)
+user:
+  name: ""
+  email: ""
+  occupation: "Developer"
+  timezone: "UTC"
+  preferred_language: "Python"
+
 hotkeys:
   summon: ctrl+shift+space
   quick_action: ctrl+shift+q
@@ -20,9 +28,29 @@ models:
   fallback: gpt-4o-mini
   coding: gpt-4o
   temperature: 0.1
+  context_length: 8000
+
+# GitHub Copilot Integration
+copilot:
+  enabled: true
+  auto_suggestions: true
+  model: gpt-4o
+  sync_context: true
+
+# Autonomy Settings - FULL AUTONOMY
+autonomy:
+  level: full
+  can_modify_config: true
+  can_create_skills: true
+  can_fix_issues: true
+  can_change_models: true
+  can_install_packages: true
+  can_access_network: true
+  can_store_personal_data: true
+  require_confirmation_destructive: true  # Only destructive ops need confirmation
 
 memory:
-  max_conversation_history: 50
+  max_conversation_history: 100
   working_db_path: data/working_memory.db
   vector_store:
     collection: intelclaw
@@ -30,38 +58,49 @@ memory:
   retention_days: 365
   auto_cleanup: true
 
+# Data Storage - FULL ACCESS
+storage:
+  store_conversations: true
+  store_contacts: true
+  store_code_snippets: true
+  store_app_usage: true
+  store_browsing_history: true
+  store_credentials: true  # Encrypted
+
 perception:
+  enabled: true
   capture_interval: 5.0
   multi_monitor: true
   ocr_language: eng
 
+# Privacy - MINIMAL RESTRICTIONS (Full Intelligence Mode)
 privacy:
   screen_capture: true
   activity_monitoring: true
-  track_keyboard: false
+  track_keyboard: true
   track_mouse: true
-  track_clipboard: false
-  excluded_windows:
-    - "*password*"
-    - "*bank*"
-    - "*1password*"
-    - "*keepass*"
-    - "*bitwarden*"
-  privacy_filter: true
+  track_clipboard: true
+  excluded_windows: []  # No exclusions
+  privacy_filter: false  # Disabled for full intelligence
 
 tools:
   enabled_categories:
     - system
     - search
     - productivity
-  tavily_api_key: ${TAVILY_API_KEY}
+    - coding
+    - files
+    - web
+    - automation
 
 mcp:
   enabled: true
   servers: []
 
+# Security - Only protect against destructive operations
 security:
-  require_confirmation_for_sensitive: true
-  max_file_size_mb: 10
-  allowed_directories: []
+  require_confirmation_for_sensitive: false
+  require_confirmation_for_destructive: true
+  max_file_size_mb: 100
+  allowed_directories: []  # All directories allowed
   audit_log_path: data/audit.log

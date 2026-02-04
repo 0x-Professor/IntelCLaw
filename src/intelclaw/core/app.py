@@ -83,6 +83,11 @@ class IntelCLawApp:
         await self.memory.initialize()
         logger.info("Memory system initialized")
         
+        # 3b. Initialize data store (for contacts, notes, etc.)
+        self.data_store = DataStore(self.config.get("memory.working_db_path", "data/datastore.db"))
+        await self.data_store.initialize()
+        logger.info("Data store initialized")
+        
         # 4. Initialize perception layer
         self.perception = PerceptionManager(self.config, self.event_bus)
         await self.perception.initialize()
@@ -93,6 +98,13 @@ class IntelCLawApp:
         await self.tools.initialize()
         logger.info("Tool registry initialized")
         
+        # 5b. Initialize GitHub Copilot integration
+        self.copilot = CopilotIntegration(self.config)
+        await self.copilot.initialize()
+        self.model_manager = ModelManager(self.config)
+        await self.model_manager.initialize()
+        logger.info("Copilot integration initialized")
+        
         # 6. Initialize agent orchestrator
         self.agent = AgentOrchestrator(
             config=self.config,
@@ -102,6 +114,11 @@ class IntelCLawApp:
         )
         await self.agent.initialize()
         logger.info("Agent orchestrator initialized")
+        
+        # 6b. Initialize self-improvement module
+        self.self_improvement = SelfImprovement(self.config)
+        await self.self_improvement.initialize(self.agent._llm if hasattr(self.agent, '_llm') else None)
+        logger.info("Self-improvement module initialized")
         
         # 7. Initialize UI components
         self.tray = SystemTray(self)
@@ -131,6 +148,9 @@ class IntelCLawApp:
         
         if self.perception:
             await self.perception.shutdown()
+        
+        if self.data_store:
+            await self.data_store.close()
         
         if self.memory:
             await self.memory.shutdown()
