@@ -507,9 +507,19 @@ class CopilotLLM:
                 response = await self._call_anthropic_api(messages)
                 return AIMessage(content=response)
             
-            # Otherwise use GitHub Models API
-            response = await self._call_github_models_api(messages)
-            return AIMessage(content=response)
+            # Otherwise use GitHub Models API (with tool support)
+            response = await self._call_github_models_api(messages, include_tools=True)
+            
+            # Build AIMessage with tool_calls if present
+            ai_message = AIMessage(content=response.get("content", ""))
+            
+            if response.get("tool_calls"):
+                # Set tool_calls attribute for LangGraph compatibility
+                ai_message.tool_calls = response["tool_calls"]
+                logger.debug(f"AIMessage created with {len(response['tool_calls'])} tool calls")
+            
+            return ai_message
+            
         except Exception as e:
             logger.error(f"Primary LLM error: {e}")
             
