@@ -234,10 +234,16 @@ class ToolRegistry:
     async def _register_builtin_tools(self) -> None:
         """Register built-in tools."""
         from intelclaw.tools.builtin.search import TavilySearchTool
-        from intelclaw.tools.builtin.file_ops import FileReadTool, FileWriteTool, FileSearchTool
+        from intelclaw.tools.builtin.file_ops import (
+            FileReadTool, FileWriteTool, FileSearchTool,
+            DirectoryListTool, GetCurrentDirectoryTool
+        )
         from intelclaw.tools.builtin.system import ScreenshotTool, ClipboardTool, LaunchAppTool
         from intelclaw.tools.builtin.web import WebScrapeTool
-        from intelclaw.tools.builtin.shell import ShellCommandTool, CodeExecutionTool, PipInstallTool
+        from intelclaw.tools.builtin.shell import (
+            ShellCommandTool, CodeExecutionTool, PipInstallTool,
+            PowerShellTool, SystemInfoTool
+        )
         
         builtin_tools = [
             # Search tools
@@ -246,16 +252,20 @@ class ToolRegistry:
             FileReadTool(),
             FileWriteTool(),
             FileSearchTool(),
+            DirectoryListTool(),
+            GetCurrentDirectoryTool(),
             # System tools
             ScreenshotTool(),
             ClipboardTool(),
             LaunchAppTool(),
+            SystemInfoTool(),
             # Web tools
             WebScrapeTool(),
             # Shell and code execution tools
             ShellCommandTool(),
             CodeExecutionTool(),
             PipInstallTool(),
+            PowerShellTool(),
         ]
         
         for tool in builtin_tools:
