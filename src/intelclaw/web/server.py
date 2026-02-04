@@ -119,38 +119,70 @@ class WebServer:
         
         @self.fastapi.get("/api/models")
         async def models():
-            """Get available models."""
+            """Get available models based on current provider."""
+            import os
+            from dotenv import load_dotenv
+            load_dotenv()
+            
+            provider = os.getenv("INTELCLAW_PROVIDER", "github-models")
+            has_copilot = bool(os.getenv("COPILOT_GITHUB_TOKEN"))
+            
+            model_list = []
+            
+            # GitHub Copilot Models (available with subscription)
+            if provider == "github-copilot" or has_copilot:
+                model_list.extend([
+                    {"id": "gpt-4o", "name": "GPT-4o (Copilot)", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "gpt-4.1", "name": "GPT-4.1", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "o1", "name": "o1 (Reasoning)", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "o1-mini", "name": "o1 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "o1-pro", "name": "o1 Pro", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "o3-mini", "name": "o3 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
+                    {"id": "claude-3.7-sonnet", "name": "Claude 3.7 Sonnet", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
+                    {"id": "claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
+                    {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "provider": "github-copilot", "category": "Google (Copilot)"},
+                    {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "github-copilot", "category": "Google (Copilot)"},
+                ])
+            
+            # GitHub Models API (FREE tier)
+            model_list.extend([
+                # OpenAI Models
+                {"id": "gpt-4o-mini", "name": "GPT-4o mini (default)", "provider": "github-models", "category": "OpenAI (Recommended)"},
+                {"id": "gpt-4o", "name": "GPT-4o", "provider": "github-models", "category": "OpenAI (Recommended)"},
+                {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "provider": "github-models", "category": "OpenAI (Recommended)"},
+                {"id": "gpt-4", "name": "GPT-4", "provider": "github-models", "category": "OpenAI (Recommended)"},
+                {"id": "o1-preview", "name": "o1-preview", "provider": "github-models", "category": "OpenAI (Recommended)"},
+                {"id": "o1-mini", "name": "o1-mini", "provider": "github-models", "category": "OpenAI (Recommended)"},
+                # Meta Llama Models
+                {"id": "llama-3.3-70b", "name": "Llama 3.3 70B", "provider": "github-models", "category": "Meta Llama"},
+                {"id": "llama-3.2-90b", "name": "Llama 3.2 90B Vision", "provider": "github-models", "category": "Meta Llama"},
+                {"id": "llama-3.1-405b", "name": "Llama 3.1 405B", "provider": "github-models", "category": "Meta Llama"},
+                {"id": "llama-3.1-70b", "name": "Llama 3.1 70B", "provider": "github-models", "category": "Meta Llama"},
+                {"id": "llama-3.1-8b", "name": "Llama 3.1 8B", "provider": "github-models", "category": "Meta Llama"},
+                # Mistral Models
+                {"id": "mistral-large", "name": "Mistral Large", "provider": "github-models", "category": "Mistral"},
+                {"id": "mistral-small", "name": "Mistral Small", "provider": "github-models", "category": "Mistral"},
+                {"id": "mistral-nemo", "name": "Mistral Nemo", "provider": "github-models", "category": "Mistral"},
+                # DeepSeek Models
+                {"id": "deepseek-r1", "name": "DeepSeek R1", "provider": "github-models", "category": "DeepSeek"},
+                {"id": "deepseek-v3", "name": "DeepSeek V3", "provider": "github-models", "category": "DeepSeek"},
+                # Microsoft Phi Models
+                {"id": "phi-4", "name": "Phi-4", "provider": "github-models", "category": "Microsoft"},
+                {"id": "phi-3.5-moe", "name": "Phi-3.5 MoE", "provider": "github-models", "category": "Microsoft"},
+                {"id": "phi-3.5-mini", "name": "Phi-3.5 Mini", "provider": "github-models", "category": "Microsoft"},
+                # Cohere Models
+                {"id": "cohere-command-r", "name": "Command R", "provider": "github-models", "category": "Cohere"},
+                {"id": "cohere-command-r-plus", "name": "Command R+", "provider": "github-models", "category": "Cohere"},
+            ])
+            
             return {
-                "models": [
-                    # OpenAI Models
-                    {"id": "gpt-4o-mini", "name": "GPT-4o mini (default)", "provider": "openai"},
-                    {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai"},
-                    {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "provider": "openai"},
-                    {"id": "gpt-4", "name": "GPT-4", "provider": "openai"},
-                    {"id": "o1-preview", "name": "o1-preview", "provider": "openai"},
-                    {"id": "o1-mini", "name": "o1-mini", "provider": "openai"},
-                    # Meta Llama Models
-                    {"id": "llama-3.3-70b", "name": "Llama 3.3 70B", "provider": "meta"},
-                    {"id": "llama-3.2-90b", "name": "Llama 3.2 90B Vision", "provider": "meta"},
-                    {"id": "llama-3.1-405b", "name": "Llama 3.1 405B", "provider": "meta"},
-                    {"id": "llama-3.1-70b", "name": "Llama 3.1 70B", "provider": "meta"},
-                    {"id": "llama-3.1-8b", "name": "Llama 3.1 8B", "provider": "meta"},
-                    # Mistral Models
-                    {"id": "mistral-large", "name": "Mistral Large", "provider": "mistral"},
-                    {"id": "mistral-small", "name": "Mistral Small", "provider": "mistral"},
-                    {"id": "mistral-nemo", "name": "Mistral Nemo", "provider": "mistral"},
-                    # DeepSeek Models
-                    {"id": "deepseek-r1", "name": "DeepSeek R1", "provider": "deepseek"},
-                    {"id": "deepseek-v3", "name": "DeepSeek V3", "provider": "deepseek"},
-                    # Microsoft Phi Models
-                    {"id": "phi-4", "name": "Phi-4", "provider": "microsoft"},
-                    {"id": "phi-3.5-moe", "name": "Phi-3.5 MoE", "provider": "microsoft"},
-                    {"id": "phi-3.5-mini", "name": "Phi-3.5 Mini", "provider": "microsoft"},
-                    # Cohere Models
-                    {"id": "cohere-command-r", "name": "Command R", "provider": "cohere"},
-                    {"id": "cohere-command-r-plus", "name": "Command R+", "provider": "cohere"},
-                ],
-                "current": self.current_model
+                "models": model_list,
+                "current": self.current_model,
+                "provider": provider,
+                "has_copilot": has_copilot
             }
         
         @self.fastapi.post("/api/chat")
