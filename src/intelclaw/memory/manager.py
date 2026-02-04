@@ -14,6 +14,7 @@ from intelclaw.memory.short_term import ShortTermMemory
 from intelclaw.memory.working_memory import WorkingMemory
 from intelclaw.memory.long_term import LongTermMemory
 from intelclaw.memory.vector_store import VectorStore
+from intelclaw.memory.agentic_rag import AgenticRAG
 
 if TYPE_CHECKING:
     from intelclaw.config.manager import ConfigManager
