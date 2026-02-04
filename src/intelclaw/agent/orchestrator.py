@@ -596,6 +596,22 @@ Be security-conscious - ask for confirmation for sensitive operations.
                     agent_response=answer,
                     tools_used=final_state["tools_used"],
                 )
+                
+                # Store session for future RAG context
+                if hasattr(self.memory, 'rag_store_session'):
+                    import uuid
+                    session_messages = [
+                        {"role": "user", "content": context.user_message},
+                        {"role": "assistant", "content": answer}
+                    ]
+                    try:
+                        await self.memory.rag_store_session(
+                            session_id=str(uuid.uuid4())[:8],
+                            messages=session_messages,
+                            metadata={"tools_used": final_state["tools_used"]}
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to store RAG session: {e}")
             
             self.status = AgentStatus.IDLE
             
