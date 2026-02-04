@@ -64,6 +64,9 @@ class MemoryManager:
         self.long_term: Optional[LongTermMemory] = None
         self.vector_store: Optional[VectorStore] = None
         
+        # Agentic RAG system (reasoning-based retrieval)
+        self.agentic_rag: Optional[AgenticRAG] = None
+        
         self._initialized = False
         
         logger.debug("MemoryManager created")
@@ -98,6 +101,20 @@ class MemoryManager:
             persist_directory=vector_config.get("path", "data/vector_db"),
         )
         await self.vector_store.initialize()
+        
+        # Initialize Agentic RAG system (reasoning-based retrieval)
+        rag_config = memory_config.get("agentic_rag", {})
+        self.agentic_rag = AgenticRAG(
+            user_id=memory_config.get("user_id", "default"),
+            persist_dir=rag_config.get("path", "data/agentic_rag"),
+        )
+        await self.agentic_rag.initialize(rag_config)
+        
+        # Index persona files for context-aware retrieval
+        from pathlib import Path
+        persona_dir = Path(__file__).parent.parent.parent.parent / "persona"
+        if persona_dir.exists():
+            await self.agentic_rag.index_persona(persona_dir)
         
         self._initialized = True
         logger.success("Memory system initialized")
