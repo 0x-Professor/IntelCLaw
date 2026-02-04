@@ -27,34 +27,47 @@ GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 # GitHub Models API endpoint (free, works with any GitHub token)
 GITHUB_MODELS_API_URL = "https://models.github.ai/inference/chat/completions"
 
-# Model ID mappings for GitHub Models
+# Model ID mappings for GitHub Models API
 # See: https://github.com/marketplace/models
+# These are ACTUAL models available on GitHub Models API
 GITHUB_MODELS = {
-    # OpenAI GPT Models
-    "gpt-4.1": "openai/gpt-4.1",
-    "gpt-4o": "openai/gpt-4o",
-    "gpt-5-mini": "openai/gpt-5-mini",
-    "gpt-5": "openai/gpt-5",
-    "gpt-5.1": "openai/gpt-5.1",
-    "gpt-5.2": "openai/gpt-5.2",
-    "gpt-5-codex": "openai/gpt-5-codex",
-    "gpt-5.1-codex": "openai/gpt-5.1-codex",
-    "gpt-5.1-codex-max": "openai/gpt-5.1-codex-max",
-    "gpt-5.1-codex-mini": "openai/gpt-5.1-codex-mini",
-    # Anthropic Claude Models
-    "claude-haiku-4.5": "anthropic/claude-haiku-4.5",
-    "claude-opus-4.5": "anthropic/claude-opus-4.5",
-    "claude-sonnet-4": "anthropic/claude-sonnet-4",
-    "claude-sonnet-4.5": "anthropic/claude-sonnet-4.5",
-    # Google Gemini Models
-    "gemini-2.5-pro": "google/gemini-2.5-pro",
-    "gemini-3-flash": "google/gemini-3-flash",
-    "gemini-3-pro": "google/gemini-3-pro",
-    # xAI Grok Models
-    "grok-code-fast-1": "xai/grok-code-fast-1",
-    # Raptor Models
-    "raptor-mini": "microsoft/raptor-mini",
+    # OpenAI Models (Available on GitHub Models)
+    "gpt-4o": "gpt-4o",
+    "gpt-4o-mini": "gpt-4o-mini",  # Default - fast and free
+    "gpt-4-turbo": "gpt-4-turbo",
+    "gpt-4": "gpt-4",
+    "o1-preview": "o1-preview",
+    "o1-mini": "o1-mini",
+    # Meta Llama Models
+    "llama-3.3-70b": "Meta-Llama-3.3-70B-Instruct",
+    "llama-3.2-90b": "Llama-3.2-90B-Vision-Instruct",
+    "llama-3.1-405b": "Meta-Llama-3.1-405B-Instruct",
+    "llama-3.1-70b": "Meta-Llama-3.1-70B-Instruct",
+    "llama-3.1-8b": "Meta-Llama-3.1-8B-Instruct",
+    # Mistral Models
+    "mistral-large": "Mistral-Large-2411",
+    "mistral-small": "Mistral-Small-24B-Instruct-2501",
+    "mistral-nemo": "Mistral-Nemo-Instruct-2407",
+    # Cohere Models
+    "cohere-command-r": "Cohere-command-r-08-2024",
+    "cohere-command-r-plus": "Cohere-command-r-plus-08-2024",
+    # DeepSeek Models
+    "deepseek-r1": "DeepSeek-R1",
+    "deepseek-v3": "DeepSeek-V3",
+    # Phi Models (Microsoft)
+    "phi-4": "Phi-4",
+    "phi-3.5-moe": "Phi-3.5-MoE-instruct",
+    "phi-3.5-mini": "Phi-3.5-mini-instruct",
+    # AI21 Jamba
+    "jamba-1.5-large": "AI21-Jamba-1.5-Large",
+    "jamba-1.5-mini": "AI21-Jamba-1.5-Mini",
 }
+
+# Default model for lightweight tasks (free tier friendly)
+DEFAULT_MODEL = "gpt-4o-mini"
+
+# Heavy task models (for complex reasoning, will use paid API if available)
+HEAVY_TASK_MODELS = ["claude-3-5-sonnet", "gpt-4o", "llama-3.3-70b"]
 
 
 def get_github_model_id(model: str) -> str:
@@ -239,28 +252,33 @@ class CopilotLLM:
     
     This allows IntelCLaw to leverage GitHub's free AI models API
     (https://models.github.ai) which provides access to:
-    - OpenAI models (GPT-4o, GPT-4.1, o1, o3)
-    - Anthropic models (Claude 3.5 Sonnet, Claude 3 Opus)
-    - Meta Llama models
+    - OpenAI models (GPT-4o, GPT-4o-mini, GPT-4-turbo)
+    - Meta Llama models (Llama 3.3, 3.2, 3.1)
+    - Mistral models
     - DeepSeek models
+    - Microsoft Phi models
     - And more!
     
     Works with any GitHub account - no Copilot subscription required
     for basic usage (rate limits apply).
+    
+    Default: gpt-4o-mini (fast, free tier friendly)
     """
     
-    def __init__(self, model: str = "gpt-4o"):
+    def __init__(self, model: str = None):
         """
         Initialize GitHub Models LLM.
         
         Args:
-            model: Model to use (gpt-4o, gpt-4o-mini, claude-3.5-sonnet, llama-3.3-70b, etc.)
+            model: Model to use (gpt-4o-mini default, gpt-4o, llama-3.3-70b, etc.)
         """
-        self.model = model
-        self._github_model_id = get_github_model_id(model)
+        self.model = model or DEFAULT_MODEL
+        self._github_model_id = get_github_model_id(self.model)
         self._initialized = False
         self._github_token: Optional[str] = None
         self._session_id: Optional[str] = None
+        self._anthropic_fallback = None  # Anthropic client for heavy tasks
+        self._use_anthropic_for_heavy = False
     
     async def initialize(self) -> bool:
         """Initialize connection to GitHub Models API."""
@@ -273,11 +291,10 @@ class CopilotLLM:
         self._github_token = github_token
         self._session_id = str(time.time_ns())
         
-        # Verify the token works with GitHub Models API
+        # Verify the token works with GitHub API
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
-                # Test with a simple request to validate token
                 async with session.get(
                     "https://api.github.com/user",
                     headers={
@@ -289,8 +306,12 @@ class CopilotLLM:
                     if response.status == 200:
                         user_data = await response.json()
                         logger.info(f"GitHub Models LLM initialized for user: {user_data.get('login', 'unknown')}")
-                        logger.info(f"Using model: {self._github_model_id}")
+                        logger.info(f"Using model: {self._github_model_id} (default: {DEFAULT_MODEL})")
                         self._initialized = True
+                        
+                        # Initialize Anthropic fallback if API key is available
+                        await self._init_anthropic_fallback()
+                        
                         return True
                     else:
                         logger.warning(f"GitHub token validation failed: {response.status}")
@@ -298,6 +319,20 @@ class CopilotLLM:
         except Exception as e:
             logger.error(f"Error validating GitHub token: {e}")
             return False
+    
+    async def _init_anthropic_fallback(self):
+        """Initialize Anthropic as fallback for heavy tasks."""
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+        if anthropic_key:
+            try:
+                import anthropic
+                self._anthropic_fallback = anthropic.AsyncAnthropic(api_key=anthropic_key)
+                self._use_anthropic_for_heavy = True
+                logger.info("Anthropic fallback enabled for heavy tasks (Claude 3.5 Sonnet)")
+            except ImportError:
+                logger.debug("anthropic package not installed, skipping fallback")
+            except Exception as e:
+                logger.debug(f"Could not initialize Anthropic fallback: {e}")
     
     async def _get_github_token(self) -> Optional[str]:
         """
