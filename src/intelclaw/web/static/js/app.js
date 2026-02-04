@@ -46,9 +46,12 @@ class IntelCLawApp {
      * Load models from the API and populate the selector
      */
     async _loadModels() {
+        console.log('[App] Loading models from /api/models...');
         try {
             const response = await fetch('/api/models');
             const data = await response.json();
+            
+            console.log('[App] Models API response:', data);
             
             if (data.models && data.models.length > 0) {
                 const selector = this.elements.modelSelector;
@@ -66,6 +69,9 @@ class IntelCLawApp {
                 
                 // Sort categories - Copilot first, then others
                 const sortedCategories = Object.keys(categories).sort((a, b) => {
+                    // Anthropic and OpenAI Copilot models first
+                    if (a.includes('Anthropic') && !b.includes('Anthropic')) return -1;
+                    if (!a.includes('Anthropic') && b.includes('Anthropic')) return 1;
                     if (a.includes('Copilot') && !b.includes('Copilot')) return -1;
                     if (!a.includes('Copilot') && b.includes('Copilot')) return 1;
                     return a.localeCompare(b);
@@ -77,7 +83,13 @@ class IntelCLawApp {
                     const optgroup = document.createElement('optgroup');
                     optgroup.label = category;
                     
-                    models.forEach(model => {
+                    // Filter to only chat models (exclude embeddings)
+                    const chatModels = models.filter(m => {
+                        const type = m.capabilities?.type;
+                        return !type || type === 'chat' || type === 'completion';
+                    });
+                    
+                    chatModels.forEach(model => {
                         const option = document.createElement('option');
                         option.value = model.id;
                         option.textContent = model.name;
@@ -88,7 +100,9 @@ class IntelCLawApp {
                         optgroup.appendChild(option);
                     });
                     
-                    selector.appendChild(optgroup);
+                    if (chatModels.length > 0) {
+                        selector.appendChild(optgroup);
+                    }
                 }
                 
                 // Update current model display and settings
@@ -101,9 +115,22 @@ class IntelCLawApp {
                 }
                 
                 console.log(`[App] Loaded ${data.models.length} models, provider: ${data.provider}, has_copilot: ${data.has_copilot}, dynamic: ${data.dynamic}`);
+            } else {
+                console.warn('[App] No models received from API');
+                // Add a fallback option
+                const option = document.createElement('option');
+                option.value = 'gpt-4o';
+                option.textContent = 'GPT-4o (fallback)';
+                this.elements.modelSelector.appendChild(option);
             }
         } catch (error) {
             console.error('[App] Failed to load models:', error);
+            // Add a fallback option on error
+            const option = document.createElement('option');
+            option.value = 'gpt-4o';
+            option.textContent = 'GPT-4o (error fallback)';
+            this.elements.modelSelector.innerHTML = '';
+            this.elements.modelSelector.appendChild(option);
         }
     }
 
@@ -602,7 +629,7 @@ class IntelCLawApp {
     /**
      * Handle model change
      */
-    _handleModelChange(e) {
+    async _handleModelChange(e) {
         const model = e.target.value;
         const selectedOption = e.target.options[e.target.selectedIndex];
         
@@ -622,10 +649,20 @@ class IntelCLawApp {
         this.elements.currentModelDisplay.textContent = model;
         this._saveSettings();
         
-        // Notify backend with model and provider
-        this.ws.send('set_model', { model, provider: this.settings.provider });
-        
-        console.log(`[App] Model changed to: ${model} (provider: ${this.settings.provider})`);
+        // Notify backend via REST API (more reliable than WebSocket)
+        try {
+            const response = await fetch('/api/set_model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model, provider: this.settings.provider })
+            });
+            const data = await response.json();
+            console.log(`[App] Model changed to: ${model} (provider: ${this.settings.provider})`, data);
+        } catch (err) {
+            console.error('[App] Failed to set model via API:', err);
+            // Fallback to WebSocket
+            this.ws.send('set_model', { model, provider: this.settings.provider });
+        }
     }
 
     /**

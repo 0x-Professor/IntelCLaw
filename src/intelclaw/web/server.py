@@ -246,6 +246,74 @@ class WebServer:
                 "dynamic": copilot_models_fetched
             }
         
+        @self.fastapi.post("/api/set_model")
+        async def set_model(request: Request):
+            """REST endpoint to switch the current model."""
+            data = await request.json()
+            model_id = data.get("model", "")
+            provider = data.get("provider", "github-copilot")
+            
+            if not model_id:
+                return JSONResponse({"error": "No model specified"}, status_code=400)
+            
+            # Update current model
+            old_model = self.current_model
+            self.current_model = model_id
+            
+            # Update LLM provider if possible
+            try:
+                if self._app and hasattr(self._app, 'agent') and hasattr(self._app.agent, '_llm'):
+                    if hasattr(self._app.agent._llm, 'set_model'):
+                        self._app.agent._llm.set_model(model_id)
+                    if hasattr(self._app.agent._llm, 'set_provider'):
+                        self._app.agent._llm.set_provider(provider)
+                else:
+                    from intelclaw.integrations import llm_provider
+                    if hasattr(llm_provider, 'set_model'):
+                        llm_provider.set_model(model_id)
+                    if hasattr(llm_provider, 'set_provider'):
+                        llm_provider.set_provider(provider)
+            except Exception as e:
+                logger.warning(f"Could not update LLM provider: {e}")
+            
+            logger.info(f"Model switched: {old_model} -> {model_id} (provider: {provider})")
+            
+            return {
+                "success": True,
+                "model": model_id,
+                "previous": old_model,
+                "provider": provider
+            }
+        
+        @self.fastapi.get("/api/tools")
+        async def tools():
+            """Get list of available tools."""
+            tool_list = []
+            
+            try:
+                # Try to get tools from the registry
+                from intelclaw.tools.registry import ToolRegistry
+                registry = ToolRegistry()
+                for name, tool in registry.get_all().items():
+                    tool_info = {
+                        "name": name,
+                        "description": getattr(tool, 'description', ''),
+                        "category": getattr(tool, 'category', 'general'),
+                    }
+                    tool_list.append(tool_info)
+            except Exception as e:
+                logger.debug(f"Could not load tools from registry: {e}")
+                # Return built-in tools as fallback
+                tool_list = [
+                    {"name": "shell", "description": "Execute shell commands", "category": "system"},
+                    {"name": "file_read", "description": "Read file contents", "category": "file"},
+                    {"name": "file_write", "description": "Write file contents", "category": "file"},
+                    {"name": "search", "description": "Search for files or content", "category": "search"},
+                    {"name": "web_browse", "description": "Browse web pages", "category": "web"},
+                ]
+            
+            return {"tools": tool_list, "count": len(tool_list)}
+        
         @self.fastapi.post("/api/chat")
         async def chat(request: Request):
             """REST endpoint for chat (non-WebSocket)."""
