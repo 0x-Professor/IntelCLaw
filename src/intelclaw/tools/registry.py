@@ -204,16 +204,25 @@ class ToolRegistry:
         from intelclaw.tools.builtin.file_ops import FileReadTool, FileWriteTool, FileSearchTool
         from intelclaw.tools.builtin.system import ScreenshotTool, ClipboardTool, LaunchAppTool
         from intelclaw.tools.builtin.web import WebScrapeTool
+        from intelclaw.tools.builtin.shell import ShellCommandTool, CodeExecutionTool, PipInstallTool
         
         builtin_tools = [
+            # Search tools
             TavilySearchTool(),
+            # File operation tools
             FileReadTool(),
             FileWriteTool(),
             FileSearchTool(),
+            # System tools
             ScreenshotTool(),
             ClipboardTool(),
             LaunchAppTool(),
+            # Web tools
             WebScrapeTool(),
+            # Shell and code execution tools
+            ShellCommandTool(),
+            CodeExecutionTool(),
+            PipInstallTool(),
         ]
         
         for tool in builtin_tools:
