@@ -73,19 +73,33 @@ class AuthManager:
         "github-copilot": {
             "name": "GitHub Copilot",
             "auth_modes": ["oauth"],
-            "models": ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet", "o1-preview", "o1-mini"],
+            "models": ["gpt-4o", "gpt-4o-mini", "o1", "o1-mini", "o1-preview"],
             "requires_subscription": True,
         },
         "github-models": {
             "name": "GitHub Models (Free)",
             "auth_modes": ["oauth", "token"],
-            "models": ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet", "llama-3.3-70b", "deepseek-r1"],
+            "models": [
+                # OpenAI Models
+                "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-chat",
+                "gpt-4o", "gpt-4o-mini",
+                "o4-mini", "o3", "o3-mini", "o1", "o1-mini", "o1-preview",
+                # Microsoft Phi Models
+                "Phi-4", "Phi-4-mini-instruct", "Phi-4-multimodal-instruct",
+                "Phi-4-reasoning", "Phi-4-mini-reasoning",
+                # DeepSeek Models
+                "DeepSeek-R1", "DeepSeek-R1-0528", "MAI-DS-R1",
+                # xAI Grok Models
+                "Grok-3", "Grok-3-Mini",
+                # AI21 Models
+                "AI21-Jamba-1.5-Large",
+            ],
             "requires_subscription": False,
         },
         "openai": {
             "name": "OpenAI",
             "auth_modes": ["api_key"],
-            "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1-preview"],
+            "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1", "o1-mini", "o1-preview"],
             "requires_subscription": False,
         },
         "anthropic": {

@@ -30,26 +30,39 @@ GITHUB_MODELS_API_URL = "https://models.github.ai/inference/chat/completions"
 # Model ID mappings for GitHub Models
 # See: https://github.com/marketplace/models
 GITHUB_MODELS = {
-    # OpenAI Models
-    "gpt-4o": "openai/gpt-4o",
-    "gpt-4o-mini": "openai/gpt-4o-mini",
-    "gpt-4.1": "openai/gpt-4.1",
-    "gpt-4.1-mini": "openai/gpt-4.1-mini",
-    "gpt-4.1-nano": "openai/gpt-4.1-nano",
-    "o1": "openai/o1",
-    "o1-mini": "openai/o1-mini",
-    "o3-mini": "openai/o3-mini",
-    # Anthropic/Claude (through GitHub)
-    "claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
-    "claude-3-opus": "anthropic/claude-3-opus",
-    "claude-3-sonnet": "anthropic/claude-3-sonnet",
-    "claude-3-haiku": "anthropic/claude-3-haiku",
-    # Meta Llama
-    "llama-3.3-70b": "meta/llama-3.3-70b",
-    "llama-3.2-90b": "meta/llama-3.2-90b",
-    # DeepSeek
-    "deepseek-r1": "deepseek/deepseek-r1",
-    "deepseek-v3": "deepseek/deepseek-v3",
+    # OpenAI Models (GPT-5 family)
+    "gpt-5": "azure-openai/gpt-5",
+    "gpt-5-mini": "azure-openai/gpt-5-mini",
+    "gpt-5-nano": "azure-openai/gpt-5-nano",
+    "gpt-5-chat": "azure-openai/gpt-5-chat",
+    # OpenAI Models (GPT-4 family)
+    "gpt-4o": "azure-openai/gpt-4o",
+    "gpt-4o-mini": "azure-openai/gpt-4o-mini",
+    # OpenAI Reasoning Models
+    "o4-mini": "azure-openai/o4-mini",
+    "o3": "azure-openai/o3",
+    "o3-mini": "azure-openai/o3-mini",
+    "o1": "azure-openai/o1",
+    "o1-mini": "azure-openai/o1-mini",
+    "o1-preview": "azure-openai/o1-preview",
+    # Microsoft Phi Models
+    "phi-4": "azureml/Phi-4",
+    "phi-4-mini-instruct": "azureml/Phi-4-mini-instruct",
+    "phi-4-multimodal-instruct": "azureml/Phi-4-multimodal-instruct",
+    "phi-4-reasoning": "azureml/Phi-4-reasoning",
+    "phi-4-mini-reasoning": "azureml/Phi-4-mini-reasoning",
+    # DeepSeek Models
+    "deepseek-r1": "deepseek/DeepSeek-R1",
+    "deepseek-r1-0528": "deepseek/DeepSeek-R1-0528",
+    "mai-ds-r1": "microsoft/MAI-DS-R1",
+    # xAI Grok Models
+    "grok-3": "xai/Grok-3",
+    "grok-3-mini": "xai/Grok-3-Mini",
+    # AI21 Models
+    "ai21-jamba-1.5-large": "azureml-ai21/AI21-Jamba-1-5-Large",
+    # OpenAI Embeddings
+    "text-embedding-3-small": "azure-openai/text-embedding-3-small",
+    "text-embedding-3-large": "azure-openai/text-embedding-3-large",
 }
 
 
