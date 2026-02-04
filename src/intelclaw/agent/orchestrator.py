@@ -9,6 +9,7 @@ This is the root agent that:
 """
 
 import asyncio
+import os
 import time
 from datetime import datetime
 from typing import Any, Annotated, Dict, List, Optional, Sequence, TypedDict, TYPE_CHECKING
@@ -16,7 +17,6 @@ from typing import Any, Annotated, Dict, List, Optional, Sequence, TypedDict, TY
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import BaseTool
-from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
@@ -31,6 +31,7 @@ from intelclaw.agent.base import (
     BaseAgent,
 )
 from intelclaw.agent.router import IntentRouter
+from intelclaw.integrations.llm_provider import LLMProvider
 
 if TYPE_CHECKING:
     from intelclaw.config.manager import ConfigManager
