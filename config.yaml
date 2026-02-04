@@ -1,0 +1,67 @@
+app:
+  name: IntelCLaw
+  version: 0.1.0
+  debug: false
+
+hotkeys:
+  summon: ctrl+shift+space
+  quick_action: ctrl+shift+q
+  dismiss: escape
+
+ui:
+  theme: dark
+  transparency: 0.95
+  position: center
+  width: 600
+  height: 500
+
+models:
+  primary: gpt-4o
+  fallback: gpt-4o-mini
+  coding: gpt-4o
+  temperature: 0.1
+
+memory:
+  max_conversation_history: 50
+  working_db_path: data/working_memory.db
+  vector_store:
+    collection: intelclaw
+    path: data/vector_db
+  retention_days: 365
+  auto_cleanup: true
+
+perception:
+  capture_interval: 5.0
+  multi_monitor: true
+  ocr_language: eng
+
+privacy:
+  screen_capture: true
+  activity_monitoring: true
+  track_keyboard: false
+  track_mouse: true
+  track_clipboard: false
+  excluded_windows:
+    - "*password*"
+    - "*bank*"
+    - "*1password*"
+    - "*keepass*"
+    - "*bitwarden*"
+  privacy_filter: true
+
+tools:
+  enabled_categories:
+    - system
+    - search
+    - productivity
+  tavily_api_key: ${TAVILY_API_KEY}
+
+mcp:
+  enabled: true
+  servers: []
+
+security:
+  require_confirmation_for_sensitive: true
+  max_file_size_mb: 10
+  allowed_directories: []
+  audit_log_path: data/audit.log
