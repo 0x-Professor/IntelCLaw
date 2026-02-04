@@ -188,7 +188,15 @@ class WebServer:
                         await self._handle_chat(data, websocket, current_session_id)
                     
                     elif msg_type == "set_model":
-                        self.current_model = data.get("model", self.current_model)
+                        new_model = data.get("model", self.current_model)
+                        self.current_model = new_model
+                        
+                        # Update the LLM model if available
+                        if self._app and self._app.agent and hasattr(self._app.agent, '_llm'):
+                            if hasattr(self._app.agent._llm, 'set_model'):
+                                self._app.agent._llm.set_model(new_model)
+                                logger.info(f"Model changed to: {new_model}")
+                        
                         await self.manager.send_message({
                             "type": "state",
                             "model": self.current_model
@@ -227,6 +235,11 @@ class WebServer:
         # Update current model if changed
         if model != self.current_model:
             self.current_model = model
+            # Update the LLM model
+            if self._app and self._app.agent and hasattr(self._app.agent, '_llm'):
+                if hasattr(self._app.agent._llm, 'set_model'):
+                    self._app.agent._llm.set_model(model)
+                    logger.info(f"Model changed to: {model}")
         
         # Store user message
         if session_id:

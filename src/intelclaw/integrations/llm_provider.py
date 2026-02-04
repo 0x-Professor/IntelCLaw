@@ -12,12 +12,6 @@ To get started:
 2. Go to https://github.com/settings/tokens?type=beta (Fine-grained tokens)
 3. Create a new token with 'Models' read permission (under Account permissions)
 4. Set the token in .env: GITHUB_TOKEN=your_token_here
-
-Available model families:
-- GPT (OpenAI): GPT-4.1, GPT-4o, GPT-5 series
-- Claude (Anthropic): Haiku 4.5, Sonnet 4/4.5, Opus 4.5
-- Gemini (Google): 2.5 Pro, 3 Flash, 3 Pro
-- Other: Grok, Raptor, Llama, Mistral, DeepSeek
 """
 
 import asyncio
@@ -44,88 +38,66 @@ GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 GITHUB_MODELS_API_URL = "https://models.inference.ai.azure.com/chat/completions"
 
 # =============================================================================
-# MODEL CONFIGURATIONS - Updated February 2026
+# MODEL CONFIGURATIONS - Actual GitHub Models API Models
 # =============================================================================
 
-# GitHub Copilot Models - Available through GitHub Models API
+# GitHub Models API - Actual available models
+# See: https://github.com/marketplace/models
 GITHUB_MODELS = {
     # =========================================================================
-    # OpenAI GPT Models (Latest)
+    # OpenAI Models (Recommended)
     # =========================================================================
-    "gpt-4.1": "gpt-4.1",
-    "gpt-4o": "gpt-4o",
-    "gpt-4o-mini": "gpt-4o-mini",
-    "gpt-5-mini": "gpt-5-mini",
-    "gpt-5": "gpt-5",
-    "gpt-5.1": "gpt-5.1",
-    "gpt-5.2": "gpt-5.2",
-    # GPT-5 Codex Series (Optimized for code)
-    "gpt-5-codex": "gpt-5-codex",
-    "gpt-5.1-codex": "gpt-5.1-codex",
-    "gpt-5.1-codex-max": "gpt-5.1-codex-max",
-    "gpt-5.1-codex-mini": "gpt-5.1-codex-mini",
+    "gpt-4o-mini": "gpt-4o-mini",        # Default - fast and efficient
+    "gpt-4o": "gpt-4o",                   # Most capable
+    "gpt-4-turbo": "gpt-4-turbo",         # Fast GPT-4
+    "gpt-4": "gpt-4",                     # Standard GPT-4
+    "o1-preview": "o1-preview",           # Reasoning model
+    "o1-mini": "o1-mini",                 # Smaller reasoning model
     
     # =========================================================================
-    # Anthropic Claude Models
-    # =========================================================================
-    "claude-haiku-4.5": "claude-haiku-4.5",
-    "claude-sonnet-4": "claude-sonnet-4",
-    "claude-sonnet-4.5": "claude-sonnet-4.5",
-    "claude-opus-4.5": "claude-opus-4.5",
-    
-    # =========================================================================
-    # Google Gemini Models
-    # =========================================================================
-    "gemini-2.5-pro": "gemini-2.5-pro",
-    "gemini-3-flash": "gemini-3-flash",
-    "gemini-3-pro": "gemini-3-pro",
-    
-    # =========================================================================
-    # Other Models
-    # =========================================================================
-    "grok-code-fast-1": "grok-code-fast-1",
-    "raptor-mini": "raptor-mini",
-    
-    # =========================================================================
-    # Legacy/Fallback Models (Still Available)
-    # =========================================================================
-    "gpt-4-turbo": "gpt-4-turbo",
-    "gpt-4": "gpt-4",
-    "o1-preview": "o1-preview",
-    "o1-mini": "o1-mini",
     # Meta Llama Models
+    # =========================================================================
     "llama-3.3-70b": "Meta-Llama-3.3-70B-Instruct",
     "llama-3.2-90b": "Llama-3.2-90B-Vision-Instruct",
     "llama-3.1-405b": "Meta-Llama-3.1-405B-Instruct",
+    "llama-3.1-70b": "Meta-Llama-3.1-70B-Instruct",
+    "llama-3.1-8b": "Meta-Llama-3.1-8B-Instruct",
+    
+    # =========================================================================
     # Mistral Models
+    # =========================================================================
     "mistral-large": "Mistral-Large-2411",
     "mistral-small": "Mistral-Small-24B-Instruct-2501",
+    "mistral-nemo": "Mistral-Nemo-Instruct-2407",
+    
+    # =========================================================================
     # DeepSeek Models
+    # =========================================================================
     "deepseek-r1": "DeepSeek-R1",
     "deepseek-v3": "DeepSeek-V3",
+    
+    # =========================================================================
     # Microsoft Phi Models
+    # =========================================================================
     "phi-4": "Phi-4",
     "phi-3.5-moe": "Phi-3.5-MoE-instruct",
-}
-
-# Model categories for easy selection
-MODEL_CATEGORIES = {
-    "gpt": ["gpt-4.1", "gpt-4o", "gpt-4o-mini", "gpt-5-mini", "gpt-5", "gpt-5.1", "gpt-5.2"],
-    "gpt-codex": ["gpt-5-codex", "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini"],
-    "claude": ["claude-haiku-4.5", "claude-sonnet-4", "claude-sonnet-4.5", "claude-opus-4.5"],
-    "gemini": ["gemini-2.5-pro", "gemini-3-flash", "gemini-3-pro"],
-    "other": ["grok-code-fast-1", "raptor-mini"],
-    "open-source": ["llama-3.3-70b", "mistral-large", "deepseek-r1", "phi-4"],
+    "phi-3.5-mini": "Phi-3.5-mini-instruct",
+    
+    # =========================================================================
+    # Cohere Models
+    # =========================================================================
+    "cohere-command-r": "Cohere-command-r-08-2024",
+    "cohere-command-r-plus": "Cohere-command-r-plus-08-2024",
 }
 
 # Default model - fast and capable
-DEFAULT_MODEL = os.getenv("INTELCLAW_DEFAULT_MODEL", "gpt-4o")
+DEFAULT_MODEL = os.getenv("INTELCLAW_DEFAULT_MODEL", "gpt-4o-mini")
 
 # Heavy task models (for complex reasoning)
-HEAVY_TASK_MODELS = ["claude-opus-4.5", "gpt-5.1", "gpt-5.1-codex-max", "gemini-3-pro"]
+HEAVY_TASK_MODELS = ["gpt-4o", "llama-3.1-405b", "mistral-large"]
 
 # Coding-optimized models
-CODING_MODELS = ["gpt-5-codex", "gpt-5.1-codex", "gpt-5.1-codex-max", "grok-code-fast-1"]
+CODING_MODELS = ["gpt-4o", "deepseek-v3", "llama-3.3-70b"]
 
 
 def get_github_model_id(model: str) -> str:
@@ -294,6 +266,25 @@ class CopilotLLM:
         self._session_id: Optional[str] = None
         self._anthropic_fallback = None  # Anthropic client for heavy tasks
         self._use_anthropic_for_heavy = False
+        self._bound_tools = []
+        self._tools_schema = []
+    
+    def set_model(self, model: str) -> None:
+        """
+        Change the model at runtime.
+        
+        Args:
+            model: New model to use (e.g., 'gpt-4o', 'llama-3.3-70b')
+        """
+        if model in GITHUB_MODELS:
+            self.model = model
+            self._github_model_id = GITHUB_MODELS[model]
+            logger.info(f"Model changed to: {self._github_model_id}")
+        else:
+            # Try using it directly
+            self.model = model
+            self._github_model_id = model
+            logger.info(f"Model changed to: {model} (custom)")
     
     async def initialize(self) -> bool:
         """Initialize connection to GitHub Models API."""
