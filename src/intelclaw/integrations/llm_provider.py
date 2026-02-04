@@ -123,6 +123,128 @@ COPILOT_MODELS = [
 ]
 
 
+async def fetch_copilot_models(copilot_token: str, base_url: str = DEFAULT_COPILOT_API_BASE_URL) -> List[Dict[str, Any]]:
+    """
+    Fetch available models from the GitHub Copilot API.
+    
+    The Copilot API has a /models endpoint that lists available models
+    based on your subscription.
+    """
+    import aiohttp
+    
+    models = []
+    
+    try:
+        headers = {
+            "Authorization": f"Bearer {copilot_token}",
+            "Accept": "application/json",
+            "Editor-Version": "vscode/1.96.2",
+            "Editor-Plugin-Version": "copilot-chat/0.26.7",
+            "User-Agent": "GitHubCopilotChat/0.26.7",
+            "X-Github-Api-Version": "2025-04-01",
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{base_url}/models", headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    # Parse the models response
+                    if isinstance(data, dict) and "data" in data:
+                        for model in data["data"]:
+                            model_id = model.get("id", "")
+                            model_name = model.get("name", model_id)
+                            
+                            # Determine category based on model ID
+                            category = "Other (Copilot)"
+                            if "gpt" in model_id.lower() or "o1" in model_id.lower() or "o3" in model_id.lower():
+                                category = "OpenAI (Copilot)"
+                            elif "claude" in model_id.lower():
+                                category = "Anthropic (Copilot)"
+                            elif "gemini" in model_id.lower():
+                                category = "Google (Copilot)"
+                            
+                            models.append({
+                                "id": model_id,
+                                "name": model_name,
+                                "provider": "github-copilot",
+                                "category": category,
+                                "capabilities": model.get("capabilities", {}),
+                            })
+                    
+                    logger.debug(f"Fetched {len(models)} models from Copilot API")
+                else:
+                    logger.debug(f"Failed to fetch Copilot models: {response.status}")
+    except Exception as e:
+        logger.debug(f"Error fetching Copilot models: {e}")
+    
+    return models
+
+
+async def fetch_github_models_list(github_token: str) -> List[Dict[str, Any]]:
+    """
+    Fetch available models from GitHub Models API.
+    
+    Uses the Azure AI inference models endpoint.
+    """
+    import aiohttp
+    
+    models = []
+    
+    try:
+        headers = {
+            "Authorization": f"Bearer {github_token}",
+            "Accept": "application/json",
+        }
+        
+        # GitHub Models uses Azure AI Models endpoint
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://models.inference.ai.azure.com/models",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    if isinstance(data, list):
+                        for model in data:
+                            model_id = model.get("id", model.get("name", ""))
+                            model_name = model.get("friendly_name", model.get("name", model_id))
+                            publisher = model.get("publisher", "").lower()
+                            
+                            # Determine category
+                            category = "Other (GitHub Models)"
+                            if publisher == "openai" or "gpt" in model_id.lower() or "o1" in model_id.lower():
+                                category = "OpenAI (GitHub Models)"
+                            elif publisher == "meta" or "llama" in model_id.lower():
+                                category = "Meta Llama (GitHub Models)"
+                            elif publisher == "mistral" or "mistral" in model_id.lower():
+                                category = "Mistral (GitHub Models)"
+                            elif "deepseek" in model_id.lower():
+                                category = "DeepSeek (GitHub Models)"
+                            elif publisher == "microsoft" or "phi" in model_id.lower():
+                                category = "Microsoft (GitHub Models)"
+                            elif "cohere" in model_id.lower():
+                                category = "Cohere (GitHub Models)"
+                            
+                            models.append({
+                                "id": model_id,
+                                "name": model_name,
+                                "provider": "github-models",
+                                "category": category,
+                                "publisher": publisher,
+                            })
+                    
+                    logger.debug(f"Fetched {len(models)} models from GitHub Models API")
+                else:
+                    logger.debug(f"Failed to fetch GitHub models: {response.status}")
+    except Exception as e:
+        logger.debug(f"Error fetching GitHub models: {e}")
+    
+    return models
+
+
 def get_github_model_id(model: str) -> str:
     """Convert a short model name to GitHub Models format."""
     # If already in provider/model format, return as-is

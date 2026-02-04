@@ -134,70 +134,96 @@ class WebServer:
         
         @self.fastapi.get("/api/models")
         async def models():
-            """Get available models based on current provider."""
+            """Get available models dynamically from the provider."""
             import os
             from dotenv import load_dotenv
             load_dotenv()
             
             provider = os.getenv("INTELCLAW_PROVIDER", "github-models")
-            has_copilot = bool(os.getenv("COPILOT_GITHUB_TOKEN"))
+            copilot_token = os.getenv("COPILOT_GITHUB_TOKEN")
+            github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+            has_copilot = bool(copilot_token)
             
             model_list = []
             
-            # GitHub Copilot Models (available with subscription)
-            if provider == "github-copilot" or has_copilot:
-                model_list.extend([
-                    {"id": "gpt-4o", "name": "GPT-4o (Copilot)", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                    {"id": "gpt-4.1", "name": "GPT-4.1", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                    {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                    {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                    {"id": "o1", "name": "o1 (Reasoning)", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                    {"id": "o1-mini", "name": "o1 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                    {"id": "o1-pro", "name": "o1 Pro", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                    {"id": "o3-mini", "name": "o3 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                    {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
-                    {"id": "claude-3.7-sonnet", "name": "Claude 3.7 Sonnet", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
-                    {"id": "claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
-                    {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "provider": "github-copilot", "category": "Google (Copilot)"},
-                    {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "github-copilot", "category": "Google (Copilot)"},
-                ])
+            # Try to fetch models dynamically from providers
+            try:
+                from intelclaw.integrations.llm_provider import (
+                    fetch_copilot_models,
+                    fetch_github_models_list,
+                    DEFAULT_COPILOT_API_BASE_URL,
+                )
+                
+                # Fetch Copilot models if we have a token
+                if has_copilot:
+                    # First, we need to get the Copilot API token
+                    copilot_base_url = os.getenv("COPILOT_API_BASE_URL", DEFAULT_COPILOT_API_BASE_URL)
+                    
+                    # Try to get cached copilot token or exchange
+                    copilot_api_token = None
+                    cache_file = Path.home() / ".intelclaw" / "copilot_token_cache.json"
+                    if cache_file.exists():
+                        try:
+                            import json, time
+                            cache_data = json.loads(cache_file.read_text(encoding="utf-8"))
+                            if cache_data.get("expires_at", 0) > time.time():
+                                copilot_api_token = cache_data.get("token")
+                                copilot_base_url = cache_data.get("base_url", copilot_base_url)
+                        except:
+                            pass
+                    
+                    if copilot_api_token:
+                        copilot_models = await fetch_copilot_models(copilot_api_token, copilot_base_url)
+                        if copilot_models:
+                            model_list.extend(copilot_models)
+                            logger.info(f"Fetched {len(copilot_models)} Copilot models dynamically")
+                
+                # Fetch GitHub Models if we have a token and no Copilot models
+                if github_token and not model_list:
+                    github_models = await fetch_github_models_list(github_token)
+                    if github_models:
+                        model_list.extend(github_models)
+                        logger.info(f"Fetched {len(github_models)} GitHub models dynamically")
+                        
+            except Exception as e:
+                logger.warning(f"Failed to fetch models dynamically: {e}")
             
-            # GitHub Models API (FREE tier)
-            model_list.extend([
-                # OpenAI Models
-                {"id": "gpt-4o-mini", "name": "GPT-4o mini (default)", "provider": "github-models", "category": "OpenAI (Recommended)"},
-                {"id": "gpt-4o", "name": "GPT-4o", "provider": "github-models", "category": "OpenAI (Recommended)"},
-                {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "provider": "github-models", "category": "OpenAI (Recommended)"},
-                {"id": "gpt-4", "name": "GPT-4", "provider": "github-models", "category": "OpenAI (Recommended)"},
-                {"id": "o1-preview", "name": "o1-preview", "provider": "github-models", "category": "OpenAI (Recommended)"},
-                {"id": "o1-mini", "name": "o1-mini", "provider": "github-models", "category": "OpenAI (Recommended)"},
-                # Meta Llama Models
-                {"id": "llama-3.3-70b", "name": "Llama 3.3 70B", "provider": "github-models", "category": "Meta Llama"},
-                {"id": "llama-3.2-90b", "name": "Llama 3.2 90B Vision", "provider": "github-models", "category": "Meta Llama"},
-                {"id": "llama-3.1-405b", "name": "Llama 3.1 405B", "provider": "github-models", "category": "Meta Llama"},
-                {"id": "llama-3.1-70b", "name": "Llama 3.1 70B", "provider": "github-models", "category": "Meta Llama"},
-                {"id": "llama-3.1-8b", "name": "Llama 3.1 8B", "provider": "github-models", "category": "Meta Llama"},
-                # Mistral Models
-                {"id": "mistral-large", "name": "Mistral Large", "provider": "github-models", "category": "Mistral"},
-                {"id": "mistral-small", "name": "Mistral Small", "provider": "github-models", "category": "Mistral"},
-                {"id": "mistral-nemo", "name": "Mistral Nemo", "provider": "github-models", "category": "Mistral"},
-                # DeepSeek Models
-                {"id": "deepseek-r1", "name": "DeepSeek R1", "provider": "github-models", "category": "DeepSeek"},
-                {"id": "deepseek-v3", "name": "DeepSeek V3", "provider": "github-models", "category": "DeepSeek"},
-                # Microsoft Phi Models
-                {"id": "phi-4", "name": "Phi-4", "provider": "github-models", "category": "Microsoft"},
-                {"id": "phi-3.5-moe", "name": "Phi-3.5 MoE", "provider": "github-models", "category": "Microsoft"},
-                {"id": "phi-3.5-mini", "name": "Phi-3.5 Mini", "provider": "github-models", "category": "Microsoft"},
-                # Cohere Models
-                {"id": "cohere-command-r", "name": "Command R", "provider": "github-models", "category": "Cohere"},
-                {"id": "cohere-command-r-plus", "name": "Command R+", "provider": "github-models", "category": "Cohere"},
-            ])
+            # Fallback to static list if dynamic fetch failed
+            if not model_list:
+                logger.debug("Using fallback static model list")
+                
+                # GitHub Copilot Models (available with subscription)
+                if provider == "github-copilot" or has_copilot:
+                    model_list.extend([
+                        {"id": "gpt-4o", "name": "GPT-4o (Copilot)", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                        {"id": "gpt-4.1", "name": "GPT-4.1", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                        {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                        {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                        {"id": "o1", "name": "o1 (Reasoning)", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                        {"id": "o1-mini", "name": "o1 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                        {"id": "o3-mini", "name": "o3 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                        {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
+                        {"id": "claude-3.7-sonnet", "name": "Claude 3.7 Sonnet", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
+                        {"id": "claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
+                        {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "provider": "github-copilot", "category": "Google (Copilot)"},
+                        {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "github-copilot", "category": "Google (Copilot)"},
+                    ])
+                
+                # GitHub Models API (FREE tier)
+                model_list.extend([
+                    {"id": "gpt-4o-mini", "name": "GPT-4o mini", "provider": "github-models", "category": "OpenAI (Free)"},
+                    {"id": "gpt-4o", "name": "GPT-4o", "provider": "github-models", "category": "OpenAI (Free)"},
+                    {"id": "llama-3.3-70b", "name": "Llama 3.3 70B", "provider": "github-models", "category": "Meta Llama"},
+                    {"id": "mistral-large", "name": "Mistral Large", "provider": "github-models", "category": "Mistral"},
+                    {"id": "deepseek-r1", "name": "DeepSeek R1", "provider": "github-models", "category": "DeepSeek"},
+                ])
             
             return {
                 "models": model_list,
                 "current": self.current_model,
                 "provider": provider,
-                "has_copilot": has_copilot
+                "has_copilot": has_copilot,
+                "dynamic": len(model_list) > 0
             }
         
         @self.fastapi.post("/api/chat")
@@ -236,17 +262,41 @@ class WebServer:
                     
                     elif msg_type == "set_model":
                         new_model = data.get("model", self.current_model)
+                        new_provider = data.get("provider", None)
                         self.current_model = new_model
                         
                         # Update the LLM model if available
+                        model_updated = False
+                        
+                        # Try updating via agent._llm
                         if self._app and self._app.agent and hasattr(self._app.agent, '_llm'):
                             if hasattr(self._app.agent._llm, 'set_model'):
                                 self._app.agent._llm.set_model(new_model)
-                                logger.info(f"Model changed to: {new_model}")
+                                model_updated = True
+                                logger.info(f"Model changed to: {new_model} (via agent._llm)")
+                        
+                        # Try updating via agent._llm_provider
+                        if self._app and self._app.agent and hasattr(self._app.agent, '_llm_provider'):
+                            llm_provider = self._app.agent._llm_provider
+                            if hasattr(llm_provider, 'set_model'):
+                                llm_provider.set_model(new_model)
+                                model_updated = True
+                                logger.info(f"Model changed to: {new_model} (via _llm_provider)")
+                            
+                            # Update provider if specified
+                            if new_provider and hasattr(llm_provider, 'active_provider'):
+                                llm_provider.active_provider = new_provider
+                                self.current_provider = new_provider
+                                logger.info(f"Provider changed to: {new_provider}")
+                        
+                        if not model_updated:
+                            logger.warning(f"Could not update model to {new_model} - no LLM provider found")
                         
                         await self.manager.send_message({
                             "type": "state",
-                            "model": self.current_model
+                            "model": self.current_model,
+                            "provider": getattr(self, 'current_provider', 'github-copilot'),
+                            "model_updated": model_updated
                         }, websocket)
                     
                     elif msg_type == "new_session":

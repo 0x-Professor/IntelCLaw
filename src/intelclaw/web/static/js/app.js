@@ -64,8 +64,16 @@ class IntelCLawApp {
                     categories[category].push(model);
                 });
                 
+                // Sort categories - Copilot first, then others
+                const sortedCategories = Object.keys(categories).sort((a, b) => {
+                    if (a.includes('Copilot') && !b.includes('Copilot')) return -1;
+                    if (!a.includes('Copilot') && b.includes('Copilot')) return 1;
+                    return a.localeCompare(b);
+                });
+                
                 // Create optgroups for each category
-                for (const [category, models] of Object.entries(categories)) {
+                for (const category of sortedCategories) {
+                    const models = categories[category];
                     const optgroup = document.createElement('optgroup');
                     optgroup.label = category;
                     
@@ -73,6 +81,7 @@ class IntelCLawApp {
                         const option = document.createElement('option');
                         option.value = model.id;
                         option.textContent = model.name;
+                        option.dataset.provider = model.provider || 'github-copilot';
                         if (model.id === data.current) {
                             option.selected = true;
                         }
@@ -82,15 +91,16 @@ class IntelCLawApp {
                     selector.appendChild(optgroup);
                 }
                 
-                // Update current model display
+                // Update current model display and settings
                 if (data.current) {
                     this.settings.model = data.current;
+                    this.settings.provider = data.provider || 'github-copilot';
                     if (this.elements.currentModelDisplay) {
                         this.elements.currentModelDisplay.textContent = data.current;
                     }
                 }
                 
-                console.log(`[App] Loaded ${data.models.length} models, provider: ${data.provider}, has_copilot: ${data.has_copilot}`);
+                console.log(`[App] Loaded ${data.models.length} models, provider: ${data.provider}, has_copilot: ${data.has_copilot}, dynamic: ${data.dynamic}`);
             }
         } catch (error) {
             console.error('[App] Failed to load models:', error);
@@ -594,12 +604,28 @@ class IntelCLawApp {
      */
     _handleModelChange(e) {
         const model = e.target.value;
+        const selectedOption = e.target.options[e.target.selectedIndex];
+        
+        // Get provider from the option's data attribute or optgroup
+        let provider = selectedOption.dataset.provider;
+        if (!provider && selectedOption.parentElement.tagName === 'OPTGROUP') {
+            const category = selectedOption.parentElement.label || '';
+            if (category.includes('Copilot')) {
+                provider = 'github-copilot';
+            } else {
+                provider = 'github-models';
+            }
+        }
+        
         this.settings.model = model;
+        this.settings.provider = provider || 'github-copilot';
         this.elements.currentModelDisplay.textContent = model;
         this._saveSettings();
         
-        // Notify backend
-        this.ws.send('set_model', { model });
+        // Notify backend with model and provider
+        this.ws.send('set_model', { model, provider: this.settings.provider });
+        
+        console.log(`[App] Model changed to: ${model} (provider: ${this.settings.provider})`);
     }
 
     /**
