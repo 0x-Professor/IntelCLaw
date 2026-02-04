@@ -1,5 +1,6 @@
 """
 Shell and Code Execution Tools - Run shell commands and execute code.
+Optimized for Windows PowerShell with cross-platform support.
 """
 
 import asyncio
@@ -16,20 +17,23 @@ from intelclaw.tools.base import BaseTool, ToolDefinition, ToolResult, ToolCateg
 
 
 class ShellCommandTool(BaseTool):
-    """Execute shell commands safely."""
+    """Execute shell commands safely with PowerShell/CMD support."""
     
     # Commands that are blocked for security
     BLOCKED_COMMANDS = [
-        "rm -rf /", "format", "del /f /s /q",
+        "rm -rf /", "format c:", "del /f /s /q c:",
         "shutdown", "reboot", "halt",
         ":(){:|:&};:",  # Fork bomb
+        "remove-item -recurse -force c:",
     ]
     
     @property
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="shell_command",
-            description="Execute a shell command and return the output. Use for system tasks, file operations, git commands, etc.",
+            description="""Execute a shell command (PowerShell on Windows, bash on Linux/Mac).
+Use for: running git commands, npm/pip commands, file operations, system info.
+Examples: 'dir', 'Get-ChildItem', 'git status', 'npm install', 'python --version'""",
             category=ToolCategory.SYSTEM,
             permissions=[ToolPermission.EXECUTE],
             parameters={
@@ -37,11 +41,11 @@ class ShellCommandTool(BaseTool):
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The shell command to execute"
+                        "description": "The shell command to execute. Use PowerShell cmdlets on Windows."
                     },
                     "working_dir": {
                         "type": "string",
-                        "description": "Working directory for the command (optional)",
+                        "description": "Working directory for the command. Use '.' for current directory.",
                         "default": None
                     },
                     "timeout": {
@@ -49,9 +53,9 @@ class ShellCommandTool(BaseTool):
                         "description": "Command timeout in seconds (default: 60)",
                         "default": 60
                     },
-                    "capture_stderr": {
+                    "use_powershell": {
                         "type": "boolean",
-                        "description": "Include stderr in output (default: true)",
+                        "description": "Force PowerShell on Windows (default: true)",
                         "default": True
                     }
                 },
@@ -67,7 +71,7 @@ class ShellCommandTool(BaseTool):
         command_lower = command.lower().strip()
         
         for blocked in self.BLOCKED_COMMANDS:
-            if blocked in command_lower:
+            if blocked.lower() in command_lower:
                 return False
         
         return True
@@ -77,10 +81,10 @@ class ShellCommandTool(BaseTool):
         command: str,
         working_dir: Optional[str] = None,
         timeout: int = 60,
-        capture_stderr: bool = True,
+        use_powershell: bool = True,
         **kwargs
     ) -> ToolResult:
-        """Execute shell command."""
+        """Execute shell command with proper Windows/PowerShell handling."""
         # Security check
         if not self._is_command_safe(command):
             return ToolResult(
@@ -92,28 +96,37 @@ class ShellCommandTool(BaseTool):
             # Resolve working directory
             cwd = None
             if working_dir:
-                cwd = Path(working_dir).expanduser().resolve()
-                if not cwd.exists():
-                    return ToolResult(
-                        success=False,
-                        error=f"Working directory not found: {working_dir}"
-                    )
+                working_dir = working_dir.strip().strip('"').strip("'")
+                if working_dir == ".":
+                    cwd = Path.cwd()
+                else:
+                    cwd = Path(working_dir).expanduser().resolve()
+                    if not cwd.exists():
+                        return ToolResult(
+                            success=False,
+                            error=f"Working directory not found: {working_dir}"
+                        )
             
             # Determine shell based on OS
             if sys.platform == "win32":
+                if use_powershell:
+                    # Use PowerShell with proper encoding
+                    full_command = f'powershell.exe -NoProfile -NonInteractive -Command "{command}"'
+                else:
+                    full_command = command
                 shell = True
                 executable = None
             else:
+                full_command = command
                 shell = True
                 executable = "/bin/bash"
             
             # Execute command
             process = await asyncio.create_subprocess_shell(
-                command,
+                full_command,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE if capture_stderr else None,
+                stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
-                shell=shell,
             )
             
             try:
@@ -128,25 +141,259 @@ class ShellCommandTool(BaseTool):
                     error=f"Command timed out after {timeout} seconds"
                 )
             
+            # Decode output with fallback encodings
+            def decode_output(data: bytes) -> str:
+                if not data:
+                    return ""
+                for encoding in ["utf-8", "cp1252", "latin-1"]:
+                    try:
+                        return data.decode(encoding)
+                    except UnicodeDecodeError:
+                        continue
+                return data.decode("utf-8", errors="replace")
+            
+            stdout_str = decode_output(stdout)
+            stderr_str = decode_output(stderr)
+            
+            return ToolResult(
+                success=process.returncode == 0,
+                data={
+                    "stdout": stdout_str.strip(),
+                    "stderr": stderr_str.strip(),
+                    "return_code": process.returncode,
+                    "command": command,
+                },
+                metadata={
+                    "working_dir": str(cwd) if cwd else os.getcwd(),
+                    "timeout": timeout,
+                    "shell": "powershell" if sys.platform == "win32" and use_powershell else "bash"
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Shell command failed: {e}")
+            return ToolResult(success=False, error=f"Command execution failed: {str(e)}")
+
+
+class PowerShellTool(BaseTool):
+    """Execute PowerShell-specific commands with better integration."""
+    
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="powershell",
+            description="""Execute PowerShell commands. Best for Windows system administration.
+Use for: Get-ChildItem, Get-Process, Get-Service, file operations, registry, etc.
+Examples: 
+- 'Get-ChildItem -Path C:\\ -Recurse -Filter *.txt'
+- 'Get-Process | Where-Object {$_.CPU -gt 10}'
+- 'Get-PSDrive' (list drives)""",
+            category=ToolCategory.SYSTEM,
+            permissions=[ToolPermission.EXECUTE],
+            parameters={
+                "type": "object",
+                "properties": {
+                    "script": {
+                        "type": "string",
+                        "description": "PowerShell script or command to execute"
+                    },
+                    "working_dir": {
+                        "type": "string",
+                        "description": "Working directory"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Timeout in seconds (default: 60)",
+                        "default": 60
+                    }
+                },
+                "required": ["script"]
+            },
+            returns="dict with output and errors",
+            requires_confirmation=True
+        )
+    
+    async def execute(
+        self,
+        script: str,
+        working_dir: Optional[str] = None,
+        timeout: int = 60,
+        **kwargs
+    ) -> ToolResult:
+        """Execute PowerShell script."""
+        if sys.platform != "win32":
+            return ToolResult(
+                success=False,
+                error="PowerShell is only available on Windows"
+            )
+        
+        try:
+            cwd = None
+            if working_dir:
+                cwd = Path(working_dir).expanduser().resolve()
+                if not cwd.exists():
+                    return ToolResult(
+                        success=False,
+                        error=f"Working directory not found: {working_dir}"
+                    )
+            
+            # Build PowerShell command
+            ps_args = [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-Command", script
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *ps_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+            )
+            
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                return ToolResult(
+                    success=False,
+                    error=f"PowerShell timed out after {timeout} seconds"
+                )
+            
             stdout_str = stdout.decode("utf-8", errors="replace") if stdout else ""
             stderr_str = stderr.decode("utf-8", errors="replace") if stderr else ""
             
             return ToolResult(
                 success=process.returncode == 0,
                 data={
-                    "stdout": stdout_str,
-                    "stderr": stderr_str,
+                    "output": stdout_str.strip(),
+                    "errors": stderr_str.strip(),
                     "return_code": process.returncode,
-                    "command": command,
                 },
-                metadata={
-                    "working_dir": str(cwd) if cwd else os.getcwd(),
-                    "timeout": timeout
-                }
+                metadata={"script": script[:100]}
             )
             
         except Exception as e:
-            logger.error(f"Shell command failed: {e}")
+            logger.error(f"PowerShell execution failed: {e}")
+            return ToolResult(success=False, error=str(e))
+
+
+class SystemInfoTool(BaseTool):
+    """Get system information - drives, memory, OS, etc."""
+    
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="system_info",
+            description="Get system information including drives, disks, memory, OS version, and environment.",
+            category=ToolCategory.SYSTEM,
+            permissions=[ToolPermission.READ],
+            parameters={
+                "type": "object",
+                "properties": {
+                    "info_type": {
+                        "type": "string",
+                        "enum": ["drives", "memory", "os", "env", "all"],
+                        "description": "Type of information to retrieve",
+                        "default": "all"
+                    }
+                },
+                "required": []
+            },
+            returns="dict with system information"
+        )
+    
+    async def execute(
+        self,
+        info_type: str = "all",
+        **kwargs
+    ) -> ToolResult:
+        """Get system information."""
+        try:
+            import platform
+            
+            result = {}
+            
+            if info_type in ["drives", "all"]:
+                # Get drive information
+                if sys.platform == "win32":
+                    import ctypes
+                    drives = []
+                    bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+                    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                        if bitmask & 1:
+                            drive_path = f"{letter}:\\"
+                            try:
+                                total, used, free = 0, 0, 0
+                                if Path(drive_path).exists():
+                                    import shutil
+                                    usage = shutil.disk_usage(drive_path)
+                                    total = usage.total // (1024**3)  # GB
+                                    free = usage.free // (1024**3)
+                                    used = usage.used // (1024**3)
+                                drives.append({
+                                    "drive": drive_path,
+                                    "total_gb": total,
+                                    "used_gb": used,
+                                    "free_gb": free
+                                })
+                            except:
+                                drives.append({"drive": drive_path, "accessible": False})
+                        bitmask >>= 1
+                    result["drives"] = drives
+                else:
+                    # Unix - get mounted filesystems
+                    import shutil
+                    result["drives"] = [{
+                        "path": "/",
+                        **dict(zip(["total_gb", "used_gb", "free_gb"], 
+                                   [x // (1024**3) for x in shutil.disk_usage("/")]))
+                    }]
+            
+            if info_type in ["memory", "all"]:
+                try:
+                    import psutil
+                    mem = psutil.virtual_memory()
+                    result["memory"] = {
+                        "total_gb": round(mem.total / (1024**3), 2),
+                        "available_gb": round(mem.available / (1024**3), 2),
+                        "used_percent": mem.percent
+                    }
+                except ImportError:
+                    result["memory"] = {"error": "psutil not installed"}
+            
+            if info_type in ["os", "all"]:
+                result["os"] = {
+                    "system": platform.system(),
+                    "release": platform.release(),
+                    "version": platform.version(),
+                    "machine": platform.machine(),
+                    "python_version": platform.python_version()
+                }
+            
+            if info_type in ["env", "all"]:
+                # Safe subset of environment variables
+                safe_vars = ["PATH", "HOME", "USERPROFILE", "USERNAME", "USER", 
+                             "COMPUTERNAME", "HOSTNAME", "VIRTUAL_ENV"]
+                result["environment"] = {
+                    k: os.environ.get(k, "") 
+                    for k in safe_vars if k in os.environ
+                }
+                result["cwd"] = str(Path.cwd())
+            
+            return ToolResult(
+                success=True,
+                data=result,
+                metadata={"info_type": info_type}
+            )
+            
+        except Exception as e:
+            logger.error(f"System info failed: {e}")
             return ToolResult(success=False, error=str(e))
 
 
