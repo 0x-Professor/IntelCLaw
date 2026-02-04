@@ -52,38 +52,58 @@ def print_banner():
 
 def setup_api_keys() -> dict:
     """Configure API keys."""
-    console.print("\n[bold cyan]Step 1: API Keys Configuration[/bold cyan]\n")
+    console.print("\n[bold cyan]Step 1: LLM Configuration[/bold cyan]\n")
     
     keys = {}
     
-    # OpenAI (Required)
-    console.print("[yellow]OpenAI API Key[/yellow] (Required for main agent)")
-    console.print("Get your key at: https://platform.openai.com/api-keys")
-    openai_key = Prompt.ask("Enter OpenAI API Key", password=True)
-    if openai_key:
-        keys["OPENAI_API_KEY"] = openai_key
+    console.print("""
+[bold]IntelCLaw can use your LLM in two ways:[/bold]
+
+[green]1. GitHub Copilot (Recommended)[/green]
+   - Uses your existing Copilot subscription
+   - No additional API keys needed
+   - Automatically detected from VS Code
+
+[yellow]2. Direct API Keys[/yellow]
+   - Use OpenAI, Anthropic, etc. directly
+   - Requires separate API keys
+    """)
     
-    # Tavily (Recommended)
-    console.print("\n[yellow]Tavily API Key[/yellow] (Recommended for web search)")
-    console.print("Get your key at: https://tavily.com")
-    if Confirm.ask("Configure Tavily?", default=True):
+    use_copilot = Confirm.ask("Use GitHub Copilot as primary LLM?", default=True)
+    
+    if use_copilot:
+        console.print("\n[green]✓ Will use GitHub Copilot[/green]")
+        console.print("  Make sure you're logged into GitHub Copilot in VS Code")
+        keys["USE_COPILOT"] = "true"
+        
+        # Optional: GitHub token for enhanced features
+        console.print("\n[yellow]GitHub Token[/yellow] (Optional - for repository access)")
+        if Confirm.ask("Add GitHub token for repo access?", default=False):
+            github_token = Prompt.ask("Enter GitHub Personal Access Token", password=True)
+            if github_token:
+                keys["GITHUB_TOKEN"] = github_token
+    else:
+        # OpenAI (Required if not using Copilot)
+        console.print("\n[yellow]OpenAI API Key[/yellow] (Required)")
+        console.print("Get your key at: https://platform.openai.com/api-keys")
+        openai_key = Prompt.ask("Enter OpenAI API Key", password=True)
+        if openai_key:
+            keys["OPENAI_API_KEY"] = openai_key
+        
+        # Anthropic (Optional)
+        console.print("\n[yellow]Anthropic API Key[/yellow] (Optional fallback)")
+        if Confirm.ask("Configure Anthropic?", default=False):
+            anthropic_key = Prompt.ask("Enter Anthropic API Key", password=True)
+            if anthropic_key:
+                keys["ANTHROPIC_API_KEY"] = anthropic_key
+    
+    # Tavily (Optional - for web search)
+    console.print("\n[yellow]Tavily API Key[/yellow] (Optional - for web search)")
+    console.print("Get your free key at: https://tavily.com")
+    if Confirm.ask("Configure Tavily for web search?", default=False):
         tavily_key = Prompt.ask("Enter Tavily API Key", password=True)
         if tavily_key:
             keys["TAVILY_API_KEY"] = tavily_key
-    
-    # Anthropic (Optional)
-    console.print("\n[yellow]Anthropic API Key[/yellow] (Optional fallback)")
-    if Confirm.ask("Configure Anthropic?", default=False):
-        anthropic_key = Prompt.ask("Enter Anthropic API Key", password=True)
-        if anthropic_key:
-            keys["ANTHROPIC_API_KEY"] = anthropic_key
-    
-    # GitHub (Optional)
-    console.print("\n[yellow]GitHub Token[/yellow] (For repository access)")
-    if Confirm.ask("Configure GitHub?", default=True):
-        github_token = Prompt.ask("Enter GitHub Personal Access Token", password=True)
-        if github_token:
-            keys["GITHUB_TOKEN"] = github_token
     
     return keys
 
