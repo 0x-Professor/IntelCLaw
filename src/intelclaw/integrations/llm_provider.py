@@ -296,7 +296,17 @@ class CopilotLLM:
             return False
     
     async def _get_github_token(self) -> Optional[str]:
-        """Get GitHub OAuth token from various sources."""
+        """
+        Get GitHub OAuth token from various sources.
+        
+        Priority order:
+        1. Environment variables (COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN)
+        2. IntelCLaw auth profiles (new OpenClaw-style system)
+        3. Legacy saved token
+        4. VS Code Copilot extension storage
+        5. GitHub CLI token
+        6. Interactive authentication
+        """
         # 1. Check environment variable first (COPILOT_GITHUB_TOKEN preferred, like OpenClaw)
         token = (
             os.environ.get("COPILOT_GITHUB_TOKEN") or 
@@ -307,13 +317,34 @@ class CopilotLLM:
             logger.debug("Using token from environment variable")
             return token
         
-        # 2. Check saved IntelCLaw token
+        # 2. Check new auth profiles (OpenClaw-style)
+        try:
+            from intelclaw.cli.auth import AuthManager
+            auth_manager = AuthManager()
+            
+            # Try github-models profile first (it's free and always works)
+            profile = auth_manager.get_default_profile("github-models")
+            if profile and profile.access_token and not profile.is_expired():
+                logger.debug("Using token from auth profile: github-models")
+                return profile.access_token
+            
+            # Try github-copilot profile
+            profile = auth_manager.get_default_profile("github-copilot")
+            if profile and profile.access_token and not profile.is_expired():
+                logger.debug("Using token from auth profile: github-copilot")
+                return profile.access_token
+        except ImportError:
+            logger.debug("Auth manager not available, skipping profile check")
+        except Exception as e:
+            logger.debug(f"Could not check auth profiles: {e}")
+        
+        # 3. Check legacy saved IntelCLaw token
         saved_token = GitHubAuth._load_saved_token()
         if saved_token:
             logger.debug("Using saved IntelCLaw token")
             return saved_token
         
-        # 3. Try to read from VS Code Copilot extension storage
+        # 4. Try to read from VS Code Copilot extension storage
         possible_paths = [
             Path(os.path.expanduser("~")) / "AppData" / "Roaming" / "Code" / "User" / "globalStorage" / "github.copilot" / "hosts.json",
             Path(os.path.expanduser("~")) / "AppData" / "Roaming" / "Code" / "User" / "globalStorage" / "github.copilot-chat" / "hosts.json",
@@ -338,7 +369,7 @@ class CopilotLLM:
                 except Exception as e:
                     logger.debug(f"Could not read token from {path}: {e}")
         
-        # 4. Try GitHub CLI token
+        # 5. Try GitHub CLI token
         try:
             result = subprocess.run(
                 ["gh", "auth", "token"],
@@ -352,7 +383,7 @@ class CopilotLLM:
         except Exception:
             pass
         
-        # 5. No token found - trigger interactive auth
+        # 6. No token found - trigger interactive auth
         logger.info("No GitHub token found, starting interactive authentication...")
         return await GitHubAuth.authenticate()
     
