@@ -471,6 +471,12 @@ Be security-conscious - ask for confirmation for sensitive operations.
             prefs = context["user_preferences"]
             sections.append(f"User Preferences: {prefs}\n")
         
+        # Add RAG context if query is provided
+        if context.get("rag_context"):
+            sections.append("## Retrieved Context (from memory)\n")
+            sections.append(context["rag_context"])
+            sections.append("\n")
+        
         return "\n".join(sections)
     
     async def _initialize_sub_agents(self) -> None:
@@ -514,6 +520,19 @@ Be security-conscious - ask for confirmation for sensitive operations.
                 logger.info(f"Delegating to {delegation.agent_name}")
                 return await sub_agent.process(context)
         
+        # Retrieve RAG context for better response quality
+        rag_context = ""
+        if self.memory and hasattr(self.memory, 'get_rag_context'):
+            try:
+                rag_context = await self.memory.get_rag_context(
+                    query=context.user_message,
+                    include_persona=False,  # Persona already loaded in system prompt
+                    include_session=True,
+                    max_context_chars=5000
+                )
+            except Exception as e:
+                logger.warning(f"Failed to get RAG context: {e}")
+        
         # Build initial state
         user_message = HumanMessage(content=context.user_message)
         
@@ -526,6 +545,7 @@ Be security-conscious - ask for confirmation for sensitive operations.
                 "screen_text": context.screen_context.get("text") if context.screen_context else None,
                 "active_window": context.active_window,
                 "user_preferences": context.user_preferences,
+                "rag_context": rag_context,  # Add RAG context
             },
             "thoughts": [],
             "tools_used": [],

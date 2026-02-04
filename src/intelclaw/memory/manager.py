@@ -123,6 +123,9 @@ class MemoryManager:
         """Shutdown all memory tiers."""
         logger.info("Shutting down memory system...")
         
+        if self.agentic_rag:
+            await self.agentic_rag.shutdown()
+        
         if self.vector_store:
             await self.vector_store.shutdown()
         
@@ -320,6 +323,97 @@ class MemoryManager:
         
         return context
     
+    # ==================== Agentic RAG ====================
+    
+    async def get_rag_context(
+        self,
+        query: str,
+        include_persona: bool = True,
+        include_session: bool = True,
+        max_context_chars: int = 10000
+    ) -> str:
+        """
+        Get comprehensive RAG context using reasoning-based retrieval.
+        
+        This uses the AgenticRAG system for better context retrieval
+        with hierarchical tree indexing and LLM reasoning.
+        
+        Args:
+            query: The user query
+            include_persona: Include persona files in context
+            include_session: Include relevant past sessions
+            max_context_chars: Maximum context size
+            
+        Returns:
+            Formatted context string for system prompt injection
+        """
+        if self.agentic_rag:
+            return await self.agentic_rag.build_context(
+                query=query,
+                include_persona=include_persona,
+                include_session=include_session,
+                max_context_chars=max_context_chars
+            )
+        return ""
+    
+    async def rag_retrieve(
+        self,
+        query: str,
+        strategy: str = "hybrid",
+        max_results: int = 5,
+        doc_types: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve relevant context using agentic RAG.
+        
+        Strategies:
+        - "tree": Use document tree traversal with LLM reasoning
+        - "semantic": Use vector similarity (fallback)
+        - "hybrid": Combine tree reasoning with semantic backup
+        """
+        if self.agentic_rag:
+            return await self.agentic_rag.retrieve(
+                query=query,
+                strategy=strategy,
+                max_results=max_results,
+                doc_types=doc_types
+            )
+        return []
+    
+    async def rag_index_document(
+        self,
+        doc_id: str,
+        title: str,
+        content: str,
+        doc_type: str = "generic"
+    ) -> None:
+        """
+        Index a document in the agentic RAG system.
+        
+        Creates a hierarchical tree index for reasoning-based retrieval.
+        """
+        if self.agentic_rag:
+            await self.agentic_rag.index_document(
+                doc_id=doc_id,
+                title=title,
+                content=content,
+                doc_type=doc_type
+            )
+    
+    async def rag_store_session(
+        self,
+        session_id: str,
+        messages: List[Dict[str, Any]],
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Store session conversation for future context retrieval."""
+        if self.agentic_rag:
+            await self.agentic_rag.store_session(
+                session_id=session_id,
+                messages=messages,
+                metadata=metadata
+            )
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get memory system statistics."""
         stats = {
@@ -328,6 +422,8 @@ class MemoryManager:
             "working_items": 0,
             "long_term_memories": 0,
             "vector_documents": 0,
+            "rag_available": self.agentic_rag is not None and self.agentic_rag.is_available,
+            "rag_document_trees": len(self.agentic_rag.document_trees) if self.agentic_rag else 0,
         }
         
         if self.short_term:
