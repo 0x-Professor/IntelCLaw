@@ -1214,3 +1214,115 @@ For troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/erro
 2026-02-04 19:23:25 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:554 - Calling GitHub Models API with model: gpt-4o
 2026-02-04 19:23:25 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:555 - API URL: https://models.inference.ai.azure.com/chat/completions
 2026-02-04 19:25:32 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 0
+2026-02-04 19:25:45 | INFO     | main:run_web_server:342 - ==================================================
+2026-02-04 19:25:45 | INFO     | main:run_web_server:343 - IntelCLaw - Web Interface
+2026-02-04 19:25:45 | INFO     | main:run_web_server:344 - ==================================================
+2026-02-04 19:25:46 | INFO     | intelclaw.core.app:__init__:75 - IntelCLaw application instance created
+2026-02-04 19:25:46 | INFO     | intelclaw.core.app:startup:79 - Starting IntelCLaw...
+2026-02-04 19:25:46 | INFO     | intelclaw.config.manager:load:124 - Configuration loaded from config.yaml
+2026-02-04 19:25:46 | DEBUG    | intelclaw.config.manager:_apply_env_overrides:227 - Applied env override: GITHUB_TOKEN
+2026-02-04 19:25:46 | INFO     | intelclaw.core.app:startup:84 - Configuration loaded
+2026-02-04 19:25:46 | INFO     | intelclaw.security.manager:initialize:55 - Initializing security manager...
+2026-02-04 19:25:46 | INFO     | intelclaw.security.manager:initialize:67 - Security manager initialized
+2026-02-04 19:25:46 | INFO     | intelclaw.core.app:startup:89 - Security manager initialized
+2026-02-04 19:25:46 | DEBUG    | intelclaw.memory.manager:__init__:68 - MemoryManager created
+2026-02-04 19:25:46 | INFO     | intelclaw.memory.manager:initialize:72 - Initializing memory system...
+2026-02-04 19:25:46 | INFO     | intelclaw.memory.working_memory:initialize:58 - Working memory initialized at data\working_memory.db
+2026-02-04 19:25:47 | WARNING  | intelclaw.memory.long_term:initialize:91 - Mem0 initialization failed: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable, using fallback
+2026-02-04 19:25:47 | INFO     | intelclaw.memory.vector_store:initialize:78 - Vector store initialized: intelclaw
+2026-02-04 19:25:47 | SUCCESS  | intelclaw.memory.manager:initialize:102 - Memory system initialized
+2026-02-04 19:25:47 | INFO     | intelclaw.core.app:startup:94 - Memory system initialized
+2026-02-04 19:25:47 | INFO     | intelclaw.memory.data_store:initialize:150 - DataStore initialized
+2026-02-04 19:25:47 | INFO     | intelclaw.core.app:startup:99 - Data store initialized
+2026-02-04 19:25:47 | DEBUG    | intelclaw.perception.manager:__init__:91 - PerceptionManager created
+2026-02-04 19:25:47 | INFO     | intelclaw.perception.manager:initialize:95 - Initializing perception layer...
+2026-02-04 19:25:47 | INFO     | intelclaw.perception.screen_capture:initialize:62 - Screen capture initialized with 1 monitors
+2026-02-04 19:25:47 | WARNING  | intelclaw.perception.ocr:initialize:55 - Tesseract not found: tesseract is not installed or it's not in your PATH. See README file for more information.. Install from https://github.com/tesseract-ocr/tesseract
+2026-02-04 19:25:47 | WARNING  | intelclaw.perception.ui_automation:initialize:50 - UI Automation not available (win32 not installed)
+2026-02-04 19:25:47 | INFO     | intelclaw.perception.activity_monitor:initialize:92 - Initializing activity monitor...
+2026-02-04 19:25:48 | DEBUG    | intelclaw.perception.activity_monitor:initialize:99 - Keyboard activity tracking enabled
+2026-02-04 19:25:48 | INFO     | intelclaw.perception.activity_monitor:initialize:104 - Activity monitor initialized
+2026-02-04 19:25:48 | SUCCESS  | intelclaw.perception.manager:initialize:130 - Perception layer initialized
+2026-02-04 19:25:48 | INFO     | intelclaw.core.app:startup:104 - Perception layer initialized
+2026-02-04 19:25:48 | DEBUG    | intelclaw.tools.registry:__init__:52 - ToolRegistry created
+2026-02-04 19:25:48 | INFO     | intelclaw.tools.registry:initialize:56 - Initializing tool registry...
+2026-02-04 19:25:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: tavily_search
+2026-02-04 19:25:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_read
+2026-02-04 19:25:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_write
+2026-02-04 19:25:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_search
+2026-02-04 19:25:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: screenshot
+2026-02-04 19:25:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: clipboard
+2026-02-04 19:25:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: launch_app
+2026-02-04 19:25:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: web_scrape
+2026-02-04 19:25:48 | DEBUG    | intelclaw.tools.registry:_load_mcp_tools:226 - MCP tool loading not yet implemented
+2026-02-04 19:25:48 | SUCCESS  | intelclaw.tools.registry:initialize:67 - Tool registry initialized with 8 tools
+2026-02-04 19:25:48 | INFO     | intelclaw.core.app:startup:109 - Tool registry initialized
+2026-02-04 19:25:48 | INFO     | intelclaw.integrations.copilot:initialize:63 - Copilot integration initialized (model: gpt-4o)
+2026-02-04 19:25:48 | INFO     | intelclaw.integrations.copilot:initialize:229 - Model manager initialized: {'primary': 'gpt-4o', 'fallback': 'gpt-4o-mini', 'coding': 'gpt-4o'}
+2026-02-04 19:25:48 | INFO     | intelclaw.core.app:startup:116 - Copilot integration initialized
+2026-02-04 19:25:48 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'IntelCLaw Orchestrator' initialized
+2026-02-04 19:25:48 | INFO     | intelclaw.agent.orchestrator:__init__:107 - AgentOrchestrator created
+2026-02-04 19:25:48 | INFO     | intelclaw.agent.orchestrator:initialize:111 - Initializing AgentOrchestrator...
+2026-02-04 19:25:48 | DEBUG    | intelclaw.integrations.llm_provider:_get_github_token:325 - Using token from environment variable
+2026-02-04 19:25:49 | INFO     | intelclaw.integrations.llm_provider:initialize:277 - GitHub Models LLM initialized for user: 0x-Professor
+2026-02-04 19:25:49 | INFO     | intelclaw.integrations.llm_provider:initialize:278 - Using model: gpt-4o (default: gpt-4o-mini)
+2026-02-04 19:25:49 | INFO     | intelclaw.integrations.llm_provider:initialize:692 - Using GitHub Copilot as LLM provider
+2026-02-04 19:25:49 | INFO     | intelclaw.agent.orchestrator:initialize:125 - Using LLM provider: copilot
+2026-02-04 19:25:49 | DEBUG    | intelclaw.agent.orchestrator:_build_graph:193 - LangGraph REACT workflow built
+2026-02-04 19:25:49 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Research Agent' initialized
+2026-02-04 19:25:49 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Coding Agent' initialized
+2026-02-04 19:25:49 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Task Agent' initialized
+2026-02-04 19:25:49 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'System Agent' initialized
+2026-02-04 19:25:49 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: research
+2026-02-04 19:25:49 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: coding
+2026-02-04 19:25:49 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: task
+2026-02-04 19:25:49 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: system
+2026-02-04 19:25:49 | INFO     | intelclaw.agent.orchestrator:_initialize_sub_agents:404 - Initialized 4 sub-agents
+2026-02-04 19:25:49 | SUCCESS  | intelclaw.agent.orchestrator:initialize:138 - AgentOrchestrator initialized
+2026-02-04 19:25:49 | INFO     | intelclaw.core.app:startup:126 - Agent orchestrator initialized
+2026-02-04 19:25:49 | INFO     | intelclaw.agent.self_improvement:initialize:51 - Self-improvement module initialized
+2026-02-04 19:25:49 | INFO     | intelclaw.core.app:startup:131 - Self-improvement module initialized
+2026-02-04 19:25:49 | INFO     | intelclaw.core.app:startup:140 - Running in web mode - Qt UI disabled
+2026-02-04 19:25:49 | SUCCESS  | intelclaw.core.app:startup:143 - IntelCLaw started successfully!
+2026-02-04 19:25:49 | INFO     | intelclaw.web.server:_setup_routes:95 - Mounted static files from: M:\IntelCLaw\src\intelclaw\web\static
+2026-02-04 19:25:49 | INFO     | main:run_web_server:364 - Opening browser at http://127.0.0.1:8765
+2026-02-04 19:25:49 | INFO     | intelclaw.web.server:start:432 - 🦅 IntelCLaw Web Server starting on http://127.0.0.1:8765
+2026-02-04 19:25:50 | INFO     | intelclaw.web.server:connect:37 - WebSocket connected. Total connections: 1
+2026-02-04 19:25:50 | INFO     | intelclaw.web.server:websocket_endpoint:199 - New session: session_1770215150073
+2026-02-04 19:25:52 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-04 19:25:52 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-04 19:25:55 | INFO     | intelclaw.web.server:connect:37 - WebSocket connected. Total connections: 2
+2026-02-04 19:25:55 | INFO     | intelclaw.web.server:websocket_endpoint:199 - New session: session_1770215155946
+2026-02-04 19:25:56 | INFO     | intelclaw.web.server:connect:37 - WebSocket connected. Total connections: 3
+2026-02-04 19:26:03 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-04 19:26:03 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-04 19:36:46 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 2
+2026-02-04 20:16:22 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-04 20:16:22 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-04 20:16:53 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-04 20:16:53 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-04 20:17:14 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-04 20:17:14 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-04 20:17:43 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-04 20:17:43 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-04 20:18:40 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-04 20:18:40 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-04 20:30:19 | INFO     | intelclaw.web.server:websocket_endpoint:199 - New session: session_1770219019663
+2026-02-04 22:46:12 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-04 22:46:12 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-05 00:13:26 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-05 00:13:26 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-05 00:14:14 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-05 00:14:14 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-05 00:14:43 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-05 00:14:43 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-05 00:14:56 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-05 00:14:56 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-05 00:20:28 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-05 00:20:28 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-05 00:20:43 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-05 00:20:43 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-05 00:21:13 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:556 - Calling GitHub Models API with model: gpt-4o
+2026-02-05 00:21:13 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
+2026-02-05 00:21:35 | INFO     | intelclaw.web.server:websocket_endpoint:199 - New session: session_1770232895098
+2026-02-05 01:02:25 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 1
