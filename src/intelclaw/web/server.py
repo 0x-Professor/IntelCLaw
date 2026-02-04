@@ -73,10 +73,25 @@ class WebServer:
     """
     
     def __init__(self, app: Optional["IntelCLawApp"] = None, host: str = "127.0.0.1", port: int = 8765):
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        
         self._app = app
         self.host = host
         self.port = port
-        self.current_model = "gpt-4o-mini"  # Default to fast, free-tier friendly model
+        
+        # Determine default model based on provider
+        provider = os.getenv("INTELCLAW_PROVIDER", "github-models")
+        default_model = os.getenv("INTELCLAW_DEFAULT_MODEL", "gpt-4o-mini")
+        
+        if provider == "github-copilot" and default_model == "gpt-4o-mini":
+            # Use a better default for Copilot subscribers
+            default_model = "gpt-4o"
+        
+        self.current_model = default_model
+        self.current_provider = provider
+        
         self.fastapi = FastAPI(
             title="IntelCLaw",
             description="Autonomous AI Agent Web Interface",
@@ -405,7 +420,7 @@ Once configured, I'll be able to:
         """Get the current LLM provider name."""
         if self._app and self._app.agent and hasattr(self._app.agent, '_llm_provider'):
             return self._app.agent._llm_provider.active_provider
-        return "github-models"
+        return self.current_provider
     
     def _get_fallback_html(self) -> str:
         """Return fallback HTML if static files are missing."""

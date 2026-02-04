@@ -35,10 +35,66 @@ class IntelCLawApp {
         this._cacheElements();
         this._setupEventListeners();
         this._setupWebSocket();
+        this._loadModels();  // Load models from API
         this._applySettings();
         this._createNewSession();
         
         console.log('[App] Initialization complete');
+    }
+
+    /**
+     * Load models from the API and populate the selector
+     */
+    async _loadModels() {
+        try {
+            const response = await fetch('/api/models');
+            const data = await response.json();
+            
+            if (data.models && data.models.length > 0) {
+                const selector = this.elements.modelSelector;
+                selector.innerHTML = '';  // Clear existing options
+                
+                // Group models by category
+                const categories = {};
+                data.models.forEach(model => {
+                    const category = model.category || model.provider || 'Other';
+                    if (!categories[category]) {
+                        categories[category] = [];
+                    }
+                    categories[category].push(model);
+                });
+                
+                // Create optgroups for each category
+                for (const [category, models] of Object.entries(categories)) {
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = category;
+                    
+                    models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = model.name;
+                        if (model.id === data.current) {
+                            option.selected = true;
+                        }
+                        optgroup.appendChild(option);
+                    });
+                    
+                    selector.appendChild(optgroup);
+                }
+                
+                // Update current model display
+                if (data.current) {
+                    this.settings.model = data.current;
+                    if (this.elements.currentModelDisplay) {
+                        this.elements.currentModelDisplay.textContent = data.current;
+                    }
+                }
+                
+                console.log(`[App] Loaded ${data.models.length} models, provider: ${data.provider}, has_copilot: ${data.has_copilot}`);
+            }
+        } catch (error) {
+            console.error('[App] Failed to load models:', error);
+        }
     }
 
     /**
