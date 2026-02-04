@@ -232,7 +232,7 @@ class FileSearchTool(BaseTool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="file_search",
-            description="Search for files matching a pattern in a directory.",
+            description="Search for files matching a glob pattern in a directory. Use '**/*.py' for recursive search.",
             category=ToolCategory.SYSTEM,
             permissions=[ToolPermission.READ],
             parameters={
@@ -240,11 +240,11 @@ class FileSearchTool(BaseTool):
                 "properties": {
                     "directory": {
                         "type": "string",
-                        "description": "Directory to search in"
+                        "description": "Directory to search in. Use '.' for current directory."
                     },
                     "pattern": {
                         "type": "string",
-                        "description": "Glob pattern (e.g., '*.py', '**/*.txt')"
+                        "description": "Glob pattern (e.g., '*.py', '**/*.txt', '*.{js,ts}')"
                     },
                     "max_results": {
                         "type": "integer",
@@ -266,10 +266,18 @@ class FileSearchTool(BaseTool):
     ) -> ToolResult:
         """Search for files."""
         try:
+            directory = directory.strip().strip('"').strip("'")
             dir_path = Path(directory).expanduser().resolve()
             
             if not dir_path.exists():
-                return ToolResult(success=False, error=f"Directory not found: {directory}")
+                # Try current directory
+                if directory == ".":
+                    dir_path = Path.cwd()
+                else:
+                    return ToolResult(
+                        success=False, 
+                        error=f"Directory not found: {directory}"
+                    )
             
             if not dir_path.is_dir():
                 return ToolResult(success=False, error=f"Not a directory: {directory}")
@@ -282,9 +290,188 @@ class FileSearchTool(BaseTool):
             return ToolResult(
                 success=True,
                 data=results,
-                metadata={"directory": str(dir_path), "pattern": pattern, "count": len(results)}
+                metadata={
+                    "directory": str(dir_path), 
+                    "pattern": pattern, 
+                    "count": len(results),
+                    "truncated": len(matches) >= max_results
+                }
             )
             
         except Exception as e:
             logger.error(f"File search failed: {e}")
+            return ToolResult(success=False, error=f"Search failed: {str(e)}")
+
+
+class DirectoryListTool(BaseTool):
+    """List directory contents."""
+    
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="list_directory",
+            description="List files and folders in a directory. Shows file sizes and types. Use this to explore directory structure.",
+            category=ToolCategory.SYSTEM,
+            permissions=[ToolPermission.READ],
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory path to list. Use '.' for current directory, '..' for parent."
+                    },
+                    "show_hidden": {
+                        "type": "boolean",
+                        "description": "Show hidden files (starting with .)",
+                        "default": False
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "List recursively (shows tree structure)",
+                        "default": False
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Maximum recursion depth (default: 3)",
+                        "default": 3
+                    }
+                },
+                "required": ["path"]
+            },
+            returns="list[dict]"
+        )
+    
+    async def execute(
+        self,
+        path: str,
+        show_hidden: bool = False,
+        recursive: bool = False,
+        max_depth: int = 3,
+        **kwargs
+    ) -> ToolResult:
+        """List directory contents."""
+        try:
+            path = path.strip().strip('"').strip("'")
+            dir_path = Path(path).expanduser().resolve()
+            
+            if not dir_path.exists():
+                return ToolResult(
+                    success=False, 
+                    error=f"Path not found: {path}"
+                )
+            
+            if not dir_path.is_dir():
+                return ToolResult(
+                    success=False, 
+                    error=f"Not a directory: {path}"
+                )
+            
+            def format_size(size: int) -> str:
+                """Format file size in human-readable form."""
+                for unit in ["B", "KB", "MB", "GB"]:
+                    if size < 1024:
+                        return f"{size:.1f}{unit}"
+                    size /= 1024
+                return f"{size:.1f}TB"
+            
+            def list_dir(dir_p: Path, depth: int = 0) -> List[Dict[str, Any]]:
+                """List directory recursively."""
+                items = []
+                try:
+                    for item in sorted(dir_p.iterdir()):
+                        # Skip hidden files unless requested
+                        if not show_hidden and item.name.startswith("."):
+                            continue
+                        
+                        is_dir = item.is_dir()
+                        info = {
+                            "name": item.name,
+                            "path": str(item),
+                            "type": "directory" if is_dir else "file",
+                            "size": format_size(item.stat().st_size) if not is_dir else None,
+                        }
+                        
+                        if is_dir:
+                            info["children_count"] = len(list(item.iterdir())) if item.is_dir() else 0
+                        else:
+                            info["extension"] = item.suffix.lower()
+                        
+                        items.append(info)
+                        
+                        # Recurse if requested
+                        if recursive and is_dir and depth < max_depth:
+                            children = list_dir(item, depth + 1)
+                            if children:
+                                info["children"] = children
+                                
+                except PermissionError:
+                    pass
+                
+                return items
+            
+            items = await asyncio.to_thread(list_dir, dir_path)
+            
+            # Create summary
+            files = [i for i in items if i["type"] == "file"]
+            dirs = [i for i in items if i["type"] == "directory"]
+            
+            return ToolResult(
+                success=True,
+                data=items,
+                metadata={
+                    "path": str(dir_path),
+                    "total_items": len(items),
+                    "files": len(files),
+                    "directories": len(dirs)
+                }
+            )
+            
+        except PermissionError:
+            return ToolResult(
+                success=False, 
+                error=f"Permission denied: Cannot access {path}"
+            )
+        except Exception as e:
+            logger.error(f"Directory list failed: {e}")
+            return ToolResult(success=False, error=f"Failed to list directory: {str(e)}")
+
+
+class GetCurrentDirectoryTool(BaseTool):
+    """Get the current working directory."""
+    
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="get_cwd",
+            description="Get the current working directory. Use this to find out where you are in the file system.",
+            category=ToolCategory.SYSTEM,
+            permissions=[ToolPermission.READ],
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": []
+            },
+            returns="string"
+        )
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        """Get current working directory."""
+        try:
+            cwd = Path.cwd()
+            
+            # Get additional info
+            parent = cwd.parent
+            home = Path.home()
+            
+            return ToolResult(
+                success=True,
+                data=str(cwd),
+                metadata={
+                    "path": str(cwd),
+                    "parent": str(parent),
+                    "home": str(home),
+                    "drive": cwd.drive if cwd.drive else "/"
+                }
+            )
+        except Exception as e:
             return ToolResult(success=False, error=str(e))
