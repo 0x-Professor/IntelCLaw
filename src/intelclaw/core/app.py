@@ -15,12 +15,15 @@ from loguru import logger
 from intelclaw.core.events import EventBus
 from intelclaw.config.manager import ConfigManager
 from intelclaw.agent.orchestrator import AgentOrchestrator
+from intelclaw.agent.self_improvement import SelfImprovement
 from intelclaw.memory.manager import MemoryManager
+from intelclaw.memory.data_store import DataStore
 from intelclaw.perception.manager import PerceptionManager
 from intelclaw.tools.registry import ToolRegistry
 from intelclaw.ui.overlay import OverlayWindow
 from intelclaw.ui.system_tray import SystemTray
 from intelclaw.security.manager import SecurityManager
+from intelclaw.integrations.copilot import CopilotIntegration, ModelManager
 
 
 class IntelCLawApp:
@@ -45,11 +48,17 @@ class IntelCLawApp:
         self.config: Optional[ConfigManager] = None
         self.security: Optional[SecurityManager] = None
         self.memory: Optional[MemoryManager] = None
+        self.data_store: Optional[DataStore] = None
         self.perception: Optional[PerceptionManager] = None
         self.tools: Optional[ToolRegistry] = None
         self.agent: Optional[AgentOrchestrator] = None
         self.overlay: Optional[OverlayWindow] = None
         self.tray: Optional[SystemTray] = None
+        
+        # Autonomous capabilities
+        self.self_improvement: Optional[SelfImprovement] = None
+        self.copilot: Optional[CopilotIntegration] = None
+        self.model_manager: Optional[ModelManager] = None
         
         self._config_path = config_path
         
