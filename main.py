@@ -127,6 +127,23 @@ def cli():
         action="store_true",
         help="Clear saved GitHub authentication"
     )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Start web interface instead of desktop overlay"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Port for web server (default: 8765)"
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host for web server (default: 127.0.0.1)"
+    )
     
     args = parser.parse_args()
     
@@ -152,8 +169,50 @@ def cli():
     if args.config:
         os.environ["INTELCLAW_CONFIG"] = args.config
     
-    # Run the application with Qt integration
-    run_with_qt()
+    # Run web interface or desktop app
+    if args.web:
+        asyncio.run(run_web_server(args.host, args.port))
+    else:
+        run_with_qt()
+
+
+async def run_web_server(host: str, port: int):
+    """Run the web server interface."""
+    setup_logging()
+    
+    logger.info("=" * 50)
+    logger.info("IntelCLaw - Web Interface")
+    logger.info("=" * 50)
+    
+    try:
+        from intelclaw.core.app import IntelCLawApp
+        from intelclaw.web.server import WebServer
+        import webbrowser
+        
+        # Initialize the app (without Qt UI)
+        app = IntelCLawApp()
+        
+        # Skip Qt UI components for web mode
+        os.environ["INTELCLAW_NO_QT"] = "true"
+        
+        await app.startup()
+        
+        # Create and start web server
+        web_server = WebServer(app=app, host=host, port=port)
+        
+        # Open browser
+        url = f"http://{host}:{port}"
+        logger.info(f"Opening browser at {url}")
+        webbrowser.open(url)
+        
+        # Run web server
+        await web_server.start()
+        
+    except KeyboardInterrupt:
+        logger.info("Shutdown requested")
+    except Exception as e:
+        logger.exception(f"Fatal error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
