@@ -686,7 +686,11 @@ class CopilotLLM:
                         ) as retry_response:
                             if retry_response.status == 200:
                                 retry_data = await retry_response.json()
-                                return retry_data["choices"][0]["message"]["content"]
+                                message = retry_data["choices"][0]["message"]
+                                return {
+                                    "content": message.get("content", ""),
+                                    "tool_calls": None
+                                }
                     raise Exception(f"Model '{self._github_model_id}' not found on GitHub Models API")
                 elif response.status == 429:
                     raise Exception("GitHub Models API rate limit exceeded - try again later")
