@@ -445,6 +445,11 @@ You have access to various tools to help accomplish tasks.
         
         # Run the graph
         try:
+            # Check if we have a valid compiled graph
+            if self._compiled_graph is None:
+                logger.warning("No compiled graph, using direct LLM")
+                return await self._direct_llm_response(context, start_time)
+            
             final_state = await self._compiled_graph.ainvoke(initial_state)
             
             # Extract final answer
@@ -494,14 +499,70 @@ You have access to various tools to help accomplish tasks.
             
         except Exception as e:
             logger.error(f"Agent processing error: {e}")
-            self.status = AgentStatus.ERROR
-            
+            # Try direct LLM fallback
+            try:
+                return await self._direct_llm_response(context, start_time)
+            except Exception as e2:
+                logger.error(f"Fallback also failed: {e2}")
+                self.status = AgentStatus.ERROR
+                
+                return AgentResponse(
+                    answer=f"I encountered an error: {str(e)}",
+                    success=False,
+                    error=str(e),
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+    
+    async def _direct_llm_response(self, context: AgentContext, start_time: float) -> AgentResponse:
+        """
+        Generate a response directly from the LLM without the graph.
+        Used as fallback when the graph isn't working.
+        """
+        if not self._llm:
             return AgentResponse(
-                answer=f"I encountered an error: {str(e)}",
+                answer="I'm sorry, but I'm not properly initialized. Please check the LLM configuration.",
                 success=False,
-                error=str(e),
+                error="LLM not initialized",
                 latency_ms=(time.time() - start_time) * 1000,
             )
+        
+        try:
+            # Build a simple prompt
+            system_prompt = """You are IntelCLaw, an intelligent AI assistant for Windows. 
+You help users with various tasks including:
+- Answering questions
+- Writing and debugging code
+- System operations
+- Research and information gathering
+- Task management
+
+Be helpful, concise, and accurate in your responses."""
+            
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=context.user_message)
+            ]
+            
+            # Call the LLM directly
+            response = await self._llm.ainvoke(messages)
+            
+            answer = response.content if hasattr(response, 'content') else str(response)
+            
+            latency = (time.time() - start_time) * 1000
+            
+            self.status = AgentStatus.IDLE
+            
+            return AgentResponse(
+                answer=answer,
+                thoughts=[],
+                tools_used=[],
+                latency_ms=latency,
+                success=True,
+            )
+            
+        except Exception as e:
+            logger.error(f"Direct LLM error: {e}")
+            raise
     
     async def can_handle(self, context: AgentContext) -> float:
         """Orchestrator can handle anything."""
