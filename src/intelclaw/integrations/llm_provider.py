@@ -259,49 +259,41 @@ class CopilotLLM:
         self._session_id: Optional[str] = None
     
     async def initialize(self) -> bool:
-        """Initialize connection to Copilot."""
-        # Step 1: Get GitHub OAuth token
+        """Initialize connection to GitHub Models API."""
+        # Get GitHub OAuth token
         github_token = await self._get_github_token()
         if not github_token:
-            logger.warning("Could not get GitHub OAuth token")
+            logger.warning("Could not get GitHub token")
             return False
         
         self._github_token = github_token
+        self._session_id = str(time.time_ns())
         
-        # Step 2: Exchange for Copilot API token
-        copilot_data = await GitHubAuth.exchange_for_copilot_token(github_token)
-        if not copilot_data:
-            logger.warning("Could not exchange GitHub token for Copilot API token")
-            logger.warning("Make sure you have an active GitHub Copilot subscription")
+        # Verify the token works with GitHub Models API
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                # Test with a simple request to validate token
+                async with session.get(
+                    "https://api.github.com/user",
+                    headers={
+                        "Authorization": f"Bearer {github_token}",
+                        "Accept": "application/json",
+                        "X-GitHub-Api-Version": "2022-11-28"
+                    }
+                ) as response:
+                    if response.status == 200:
+                        user_data = await response.json()
+                        logger.info(f"GitHub Models LLM initialized for user: {user_data.get('login', 'unknown')}")
+                        logger.info(f"Using model: {self._github_model_id}")
+                        self._initialized = True
+                        return True
+                    else:
+                        logger.warning(f"GitHub token validation failed: {response.status}")
+                        return False
+        except Exception as e:
+            logger.error(f"Error validating GitHub token: {e}")
             return False
-        
-        self._copilot_token = copilot_data["token"]
-        self._copilot_base_url = copilot_data.get("base_url", DEFAULT_COPILOT_API_BASE_URL)
-        self._token_expires_at = copilot_data.get("expires_at", 0)
-        
-        self._initialized = True
-        logger.info(f"Copilot LLM initialized with model: {self.model}")
-        logger.info(f"API endpoint: {self._copilot_base_url}")
-        return True
-    
-    async def _ensure_valid_token(self) -> bool:
-        """Ensure the Copilot API token is still valid, refresh if needed."""
-        if not self._copilot_token:
-            return False
-        
-        # Check if token is expiring soon (5 min buffer)
-        if time.time() > self._token_expires_at - 300:
-            logger.info("Copilot token expiring, refreshing...")
-            if self._github_token:
-                copilot_data = await GitHubAuth.exchange_for_copilot_token(self._github_token)
-                if copilot_data:
-                    self._copilot_token = copilot_data["token"]
-                    self._copilot_base_url = copilot_data.get("base_url", DEFAULT_COPILOT_API_BASE_URL)
-                    self._token_expires_at = copilot_data.get("expires_at", 0)
-                    return True
-            return False
-        
-        return True
     
     async def _get_github_token(self) -> Optional[str]:
         """Get GitHub OAuth token from various sources."""
@@ -419,36 +411,29 @@ class CopilotLLM:
                     messages.append({"role": role, "content": msg.content})
         
         try:
-            response = await self._call_copilot_api(messages)
+            response = await self._call_github_models_api(messages)
             return CopilotResponse(content=response)
         except Exception as e:
-            logger.error(f"Copilot API error: {e}")
+            logger.error(f"GitHub Models API error: {e}")
             # Fallback to local processing or error message
-            return CopilotResponse(content=f"Error calling Copilot: {e}")
+            return CopilotResponse(content=f"Error calling GitHub Models API: {e}")
     
-    async def _call_copilot_api(self, messages: List[Dict[str, str]]) -> str:
-        """Call the GitHub Copilot API using the exchanged Copilot token."""
+    async def _call_github_models_api(self, messages: List[Dict[str, str]]) -> str:
+        """Call the GitHub Models API."""
         import aiohttp
         
-        # Ensure token is valid
-        if not await self._ensure_valid_token():
-            raise Exception("Copilot token expired and could not be refreshed")
-        
-        # Use the dynamically determined base URL
-        api_url = f"{self._copilot_base_url}/chat/completions"
+        if not self._github_token:
+            raise Exception("GitHub token not available")
         
         headers = {
-            "Authorization": f"Bearer {self._copilot_token}",
+            "Authorization": f"Bearer {self._github_token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "Editor-Version": "vscode/1.96.0",
-            "Editor-Plugin-Version": "copilot-chat/0.26.0",
-            "User-Agent": "GitHubCopilotChat/0.26.0",
-            "X-Request-Id": str(time.time_ns()),
+            "X-GitHub-Api-Version": "2022-11-28",
         }
         
         payload = {
-            "model": self.model,
+            "model": self._github_model_id,
             "messages": messages,
             "temperature": 0.1,
             "max_tokens": 4096,
@@ -456,20 +441,26 @@ class CopilotLLM:
         }
         
         async with aiohttp.ClientSession() as session:
-            async with session.post(api_url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as response:
+            async with session.post(
+                GITHUB_MODELS_API_URL, 
+                headers=headers, 
+                json=payload, 
+                timeout=aiohttp.ClientTimeout(total=120)
+            ) as response:
                 if response.status == 200:
                     data = await response.json()
                     return data["choices"][0]["message"]["content"]
                 elif response.status == 401:
-                    # Token might be expired, try to refresh
-                    logger.warning("Copilot returned 401, token may be invalid")
-                    raise Exception("Copilot authentication failed - token may have expired")
+                    logger.warning("GitHub Models API returned 401, token may be invalid")
+                    raise Exception("GitHub authentication failed - token may have expired")
                 elif response.status == 403:
-                    raise Exception("Copilot access denied - ensure you have an active Copilot subscription")
+                    raise Exception("GitHub Models API access denied")
+                elif response.status == 429:
+                    raise Exception("GitHub Models API rate limit exceeded - try again later")
                 else:
                     error_text = await response.text()
-                    logger.error(f"Copilot API error: {response.status} - {error_text}")
-                    raise Exception(f"Copilot API error {response.status}: {error_text}")
+                    logger.error(f"GitHub Models API error: {response.status} - {error_text}")
+                    raise Exception(f"GitHub Models API error {response.status}: {error_text}")
     
     async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
         """Stream response from Copilot."""
