@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IntelCLaw - Control UI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="app" id="app">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">🦅</div>
+                <span class="logo-text">IntelCLaw</span>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">Main</div>
+                    <a href="#" class="nav-item active" data-view="chat">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span class="nav-item-text">Chat</span>
+                    </a>
+                    <a href="#" class="nav-item" data-view="tasks">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 11l3 3L22 4"/>
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                        </svg>
+                        <span class="nav-item-text">Tasks</span>
+                        <span class="nav-badge" id="taskCount">0</span>
+                    </a>
+                    <a href="#" class="nav-item" data-view="files">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+                            <polyline points="13,2 13,9 20,9"/>
+                        </svg>
+                        <span class="nav-item-text">Files</span>
+                    </a>
+                    <a href="#" class="nav-item" data-view="tools">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                        </svg>
+                        <span class="nav-item-text">Tools</span>
+                    </a>
+                </div>
+                
+                <div class="nav-section">
+                    <div class="nav-section-title">Sessions</div>
+                    <a href="#" class="nav-item" data-action="new-session">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 8v8"/>
+                            <path d="M8 12h8"/>
+                        </svg>
+                        <span class="nav-item-text">New Session</span>
+                    </a>
+                    <div id="sessionList"></div>
+                </div>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="status-card">
+                    <div class="status-row">
+                        <span class="status-label">Status</span>
+                        <span class="status-value">
+                            <span class="status-dot" id="connectionDot"></span>
+                            <span id="connectionStatus">Connecting</span>
+                        </span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Model</span>
+                        <span class="status-value" id="currentModelDisplay">Not set</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="header">
+                <button class="menu-toggle" id="menuToggle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <path d="M3 12h18M3 6h18M3 18h18"/>
+                    </svg>
+                </button>
+                
+                <div class="header-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    <span>Chat</span>
+                </div>
+                
+                <button class="session-selector" id="sessionSelector">
+                    <span id="currentSession">New Session</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                </button>
+                
+                <div class="header-spacer"></div>
+                
+                <div class="header-actions">
+                    <select class="model-selector" id="modelSelector">
+                        <optgroup label="GPT Models">
+                            <option value="gpt-4.1">GPT-4.1</option>
+                            <option value="gpt-4o">GPT-4o</option>
+                            <option value="gpt-5-mini">GPT-5 mini</option>
+                            <option value="gpt-5" selected>GPT-5</option>
+                            <option value="gpt-5.1">GPT-5.1</option>
+                            <option value="gpt-5.2">GPT-5.2</option>
+                            <option value="gpt-5-codex">GPT-5-Codex</option>
+                            <option value="gpt-5.1-codex">GPT-5.1-Codex</option>
+                            <option value="gpt-5.1-codex-max">GPT-5.1-Codex-Max</option>
+                            <option value="gpt-5.1-codex-mini">GPT-5.1-Codex-Mini</option>
+                        </optgroup>
+                        <optgroup label="Claude Models">
+                            <option value="claude-haiku-4.5">Claude Haiku 4.5</option>
+                            <option value="claude-sonnet-4">Claude Sonnet 4</option>
+                            <option value="claude-sonnet-4.5">Claude Sonnet 4.5</option>
+                            <option value="claude-opus-4.5">Claude Opus 4.5</option>
+                        </optgroup>
+                        <optgroup label="Gemini Models">
+                            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                            <option value="gemini-3-flash">Gemini 3 Flash</option>
+                            <option value="gemini-3-pro">Gemini 3 Pro</option>
+                        </optgroup>
+                        <optgroup label="Other Models">
+                            <option value="grok-code-fast-1">Grok Code Fast 1</option>
+                            <option value="raptor-mini">Raptor mini</option>
+                        </optgroup>
+                    </select>
+                    
+                    <button class="header-btn" id="settingsToggle" title="Settings">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                        </svg>
+                    </button>
+                </div>
+            </header>
+            
+            <!-- Chat Area -->
+            <div class="chat-area" id="chatView">
+                <div class="messages" id="messagesContainer">
+                    <!-- Empty state shown by default -->
+                    <div class="empty-state" id="emptyState">
+                        <div class="empty-icon">🦅</div>
+                        <h2 class="empty-title">Welcome to IntelCLaw</h2>
+                        <p class="empty-text">
+                            Your autonomous AI assistant for Windows. Ask me to help with coding, 
+                            file management, research, or any computer task.
+                        </p>
+                        <div class="suggestion-chips">
+                            <button class="suggestion-chip" data-suggestion="Help me write a Python script">Write Python script</button>
+                            <button class="suggestion-chip" data-suggestion="Search for files on my system">Search files</button>
+                            <button class="suggestion-chip" data-suggestion="Create a new project structure">New project</button>
+                            <button class="suggestion-chip" data-suggestion="Explain how this works">How it works</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Input Area -->
+                <div class="input-area">
+                    <div class="input-container">
+                        <div class="input-box">
+                            <div class="input-main">
+                                <textarea 
+                                    class="input-field" 
+                                    id="messageInput" 
+                                    placeholder="Ask IntelCLaw anything..." 
+                                    rows="1"
+                                ></textarea>
+                                <div class="input-actions">
+                                    <button class="input-btn" id="attachBtn" title="Attach file">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                                        </svg>
+                                    </button>
+                                    <button class="send-btn" id="sendBtn" disabled>
+                                        <span>Send</span>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <line x1="22" y1="2" x2="11" y2="13"/>
+                                            <polygon points="22,2 15,22 11,13 2,9"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="input-hint">
+                            <kbd>Enter</kbd> to send • <kbd>Shift+Enter</kbd> for new line
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </main>
+        
+        <!-- Right Panel (Settings) -->
+        <aside class="right-panel collapsed" id="rightPanel">
+            <div class="panel-header">
+                <span class="panel-title">Settings</span>
+                <button class="panel-close" id="panelClose">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="panel-tabs">
+                <button class="panel-tab active" data-tab="general">General</button>
+                <button class="panel-tab" data-tab="model">Model</button>
+                <button class="panel-tab" data-tab="tools">Tools</button>
+            </div>
+            
+            <div class="panel-content">
+                <!-- General Tab -->
+                <div class="tab-content active" id="tab-general">
+                    <div class="form-group">
+                        <label class="form-label">Theme</label>
+                        <select class="form-select" id="themeSelect">
+                            <option value="dark">Dark</option>
+                            <option value="light">Light (coming soon)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="toggle-group">
+                            <label class="form-label">Streaming Responses</label>
+                            <button class="toggle active" id="streamingToggle"></button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="toggle-group">
+                            <label class="form-label">Show Tool Calls</label>
+                            <button class="toggle active" id="showToolsToggle"></button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="toggle-group">
+                            <label class="form-label">Sound Notifications</label>
+                            <button class="toggle" id="soundToggle"></button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Model Tab -->
+                <div class="tab-content hidden" id="tab-model">
+                    <div class="form-group">
+                        <label class="form-label">Temperature</label>
+                        <input type="range" class="form-input" id="temperatureSlider" min="0" max="2" step="0.1" value="0.7">
+                        <span class="form-hint" id="temperatureValue">0.7</span>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Max Tokens</label>
+                        <input type="number" class="form-input" id="maxTokensInput" value="4096" min="100" max="32000">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">System Prompt</label>
+                        <textarea class="form-input" id="systemPromptInput" rows="6" placeholder="Custom system instructions..."></textarea>
+                    </div>
+                </div>
+                
+                <!-- Tools Tab -->
+                <div class="tab-content hidden" id="tab-tools">
+                    <div class="form-group">
+                        <div class="toggle-group">
+                            <label class="form-label">File Operations</label>
+                            <button class="toggle active" data-tool="file_ops"></button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="toggle-group">
+                            <label class="form-label">Shell Commands</label>
+                            <button class="toggle active" data-tool="shell"></button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="toggle-group">
+                            <label class="form-label">Web Search</label>
+                            <button class="toggle active" data-tool="web_search"></button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div class="toggle-group">
+                            <label class="form-label">Code Execution</label>
+                            <button class="toggle active" data-tool="code_exec"></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+    
+    <script src="/static/js/websocket.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
