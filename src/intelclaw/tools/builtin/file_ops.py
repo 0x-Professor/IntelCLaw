@@ -129,7 +129,7 @@ class FileWriteTool(BaseTool):
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="file_write",
-            description="Write content to a file. Creates parent directories if needed.",
+            description="Write or append content to a file. Creates parent directories if needed. Use this to create new files or modify existing ones.",
             category=ToolCategory.SYSTEM,
             permissions=[ToolPermission.WRITE],
             parameters={
@@ -137,22 +137,27 @@ class FileWriteTool(BaseTool):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file to write"
+                        "description": "Absolute or relative path to the file. Parent directories will be created automatically."
                     },
                     "content": {
                         "type": "string",
-                        "description": "Content to write"
+                        "description": "Content to write to the file"
                     },
                     "mode": {
                         "type": "string",
                         "enum": ["write", "append"],
-                        "description": "Write mode (default: write)",
+                        "description": "Write mode: 'write' overwrites file, 'append' adds to end (default: write)",
                         "default": "write"
                     },
                     "encoding": {
                         "type": "string",
                         "description": "File encoding (default: utf-8)",
                         "default": "utf-8"
+                    },
+                    "create_backup": {
+                        "type": "boolean",
+                        "description": "Create backup of existing file before overwriting",
+                        "default": False
                     }
                 },
                 "required": ["path", "content"]
@@ -167,33 +172,57 @@ class FileWriteTool(BaseTool):
         content: str,
         mode: str = "write",
         encoding: str = "utf-8",
+        create_backup: bool = False,
         **kwargs
     ) -> ToolResult:
-        """Write to file."""
+        """Write to file with proper handling."""
         try:
+            # Handle various path formats
+            path = path.strip().strip('"').strip("'")
             file_path = Path(path).expanduser().resolve()
             
             # Create parent directories
             file_path.parent.mkdir(parents=True, exist_ok=True)
             
-            write_mode = "w" if mode == "write" else "a"
+            # Create backup if requested and file exists
+            if create_backup and file_path.exists():
+                backup_path = file_path.with_suffix(file_path.suffix + ".bak")
+                await asyncio.to_thread(shutil.copy2, file_path, backup_path)
+                logger.debug(f"Created backup: {backup_path}")
             
-            await asyncio.to_thread(
-                file_path.write_text if mode == "write" else 
-                lambda c, e: file_path.open("a", encoding=e).write(c),
-                content,
-                encoding
-            )
+            # Write the file properly
+            if mode == "write":
+                await asyncio.to_thread(
+                    lambda: file_path.write_text(content, encoding=encoding)
+                )
+            else:  # append
+                def append_content():
+                    with file_path.open("a", encoding=encoding) as f:
+                        f.write(content)
+                await asyncio.to_thread(append_content)
+            
+            # Get file info after write
+            size = file_path.stat().st_size
             
             return ToolResult(
                 success=True,
                 data=True,
-                metadata={"path": str(file_path), "mode": mode}
+                metadata={
+                    "path": str(file_path), 
+                    "mode": mode,
+                    "size": size,
+                    "lines": content.count("\n") + 1
+                }
             )
             
+        except PermissionError:
+            return ToolResult(
+                success=False, 
+                error=f"Permission denied: Cannot write to {path}"
+            )
         except Exception as e:
             logger.error(f"File write failed: {e}")
-            return ToolResult(success=False, error=str(e))
+            return ToolResult(success=False, error=f"Failed to write file: {str(e)}")
 
 
 class FileSearchTool(BaseTool):
