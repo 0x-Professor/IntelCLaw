@@ -105,11 +105,7 @@ full = [
 ]
 
 [project.scripts]
-intelclaw = "intelclaw.cli:main"
-intelclaw-service = "intelclaw.service:main"
-
-[project.gui-scripts]
-intelclaw-gui = "intelclaw.ui.main:main"
+intelclaw = "main:cli"
 
 [project.urls]
 Homepage = "https://github.com/intelclaw/intelclaw"
