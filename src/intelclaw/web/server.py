@@ -136,86 +136,106 @@ class WebServer:
         async def models():
             """Get available models dynamically from the provider."""
             import os
+            import time as time_module
             from dotenv import load_dotenv
             load_dotenv()
             
             provider = os.getenv("INTELCLAW_PROVIDER", "github-models")
-            copilot_token = os.getenv("COPILOT_GITHUB_TOKEN")
+            copilot_github_token = os.getenv("COPILOT_GITHUB_TOKEN")
             github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
-            has_copilot = bool(copilot_token)
+            has_copilot = bool(copilot_github_token) or provider == "github-copilot"
             
             model_list = []
+            copilot_models_fetched = False
             
-            # Try to fetch models dynamically from providers
-            try:
-                from intelclaw.integrations.llm_provider import (
-                    fetch_copilot_models,
-                    fetch_github_models_list,
-                    DEFAULT_COPILOT_API_BASE_URL,
-                )
-                
-                # Fetch Copilot models if we have a token
-                if has_copilot:
-                    # First, we need to get the Copilot API token
+            # Try to fetch Copilot models dynamically
+            if has_copilot:
+                try:
+                    from intelclaw.integrations.llm_provider import (
+                        fetch_copilot_models,
+                        DEFAULT_COPILOT_API_BASE_URL,
+                    )
+                    
                     copilot_base_url = os.getenv("COPILOT_API_BASE_URL", DEFAULT_COPILOT_API_BASE_URL)
                     
-                    # Try to get cached copilot token or exchange
+                    # Try to get Copilot API token from multiple sources:
+                    # 1. First try auth-profiles.json (most up-to-date after re-auth)
+                    # 2. Fall back to copilot_token.json cache
                     copilot_api_token = None
-                    cache_file = Path.home() / ".intelclaw" / "copilot_token_cache.json"
-                    if cache_file.exists():
+                    auth_profiles_file = Path.home() / ".intelclaw" / "auth-profiles.json"
+                    cache_file = Path.home() / ".intelclaw" / "copilot_token.json"
+                    
+                    # Try auth-profiles.json first (updated on re-authentication)
+                    if auth_profiles_file.exists():
                         try:
-                            import json, time
+                            profiles_data = json.loads(auth_profiles_file.read_text(encoding="utf-8"))
+                            copilot_profile = profiles_data.get("profiles", {}).get("github-copilot:default")
+                            if copilot_profile:
+                                expires_at = copilot_profile.get("expires_at", 0)
+                                if expires_at and time_module.time() < expires_at - 300:
+                                    copilot_api_token = copilot_profile.get("access_token")
+                                    extra = copilot_profile.get("extra", {})
+                                    if extra.get("copilot_base_url"):
+                                        copilot_base_url = extra.get("copilot_base_url")
+                                    logger.info(f"Using Copilot token from auth profile (expires: {expires_at})")
+                        except Exception as e:
+                            logger.debug(f"Failed to read auth profiles: {e}")
+                    
+                    # Fall back to copilot_token.json cache
+                    if not copilot_api_token and cache_file.exists():
+                        try:
                             cache_data = json.loads(cache_file.read_text(encoding="utf-8"))
-                            if cache_data.get("expires_at", 0) > time.time():
+                            expires_at = cache_data.get("expires_at", 0)
+                            
+                            # Check if token is still valid (with 5 min buffer)
+                            if expires_at and time_module.time() < expires_at - 300:
                                 copilot_api_token = cache_data.get("token")
-                                copilot_base_url = cache_data.get("base_url", copilot_base_url)
-                        except:
-                            pass
+                                if cache_data.get("base_url"):
+                                    copilot_base_url = cache_data.get("base_url")
+                                logger.debug(f"Using cached Copilot API token (expires: {expires_at})")
+                        except Exception as e:
+                            logger.debug(f"Failed to read Copilot token cache: {e}")
                     
                     if copilot_api_token:
                         copilot_models = await fetch_copilot_models(copilot_api_token, copilot_base_url)
                         if copilot_models:
                             model_list.extend(copilot_models)
+                            copilot_models_fetched = True
                             logger.info(f"Fetched {len(copilot_models)} Copilot models dynamically")
-                
-                # Fetch GitHub Models if we have a token and no Copilot models
-                if github_token and not model_list:
-                    github_models = await fetch_github_models_list(github_token)
-                    if github_models:
-                        model_list.extend(github_models)
-                        logger.info(f"Fetched {len(github_models)} GitHub models dynamically")
+                    else:
+                        logger.debug("No valid cached Copilot API token found")
                         
-            except Exception as e:
-                logger.warning(f"Failed to fetch models dynamically: {e}")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch Copilot models: {e}")
             
-            # Fallback to static list if dynamic fetch failed
-            if not model_list:
-                logger.debug("Using fallback static model list")
-                
-                # GitHub Copilot Models (available with subscription)
-                if provider == "github-copilot" or has_copilot:
-                    model_list.extend([
-                        {"id": "gpt-4o", "name": "GPT-4o (Copilot)", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                        {"id": "gpt-4.1", "name": "GPT-4.1", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                        {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                        {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                        {"id": "o1", "name": "o1 (Reasoning)", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                        {"id": "o1-mini", "name": "o1 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                        {"id": "o3-mini", "name": "o3 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
-                        {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
-                        {"id": "claude-3.7-sonnet", "name": "Claude 3.7 Sonnet", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
-                        {"id": "claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
-                        {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "provider": "github-copilot", "category": "Google (Copilot)"},
-                        {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "github-copilot", "category": "Google (Copilot)"},
-                    ])
-                
-                # GitHub Models API (FREE tier)
+            # Always add static Copilot models if has_copilot but dynamic fetch failed
+            if has_copilot and not copilot_models_fetched:
+                logger.debug("Using static Copilot model list")
                 model_list.extend([
-                    {"id": "gpt-4o-mini", "name": "GPT-4o mini", "provider": "github-models", "category": "OpenAI (Free)"},
-                    {"id": "gpt-4o", "name": "GPT-4o", "provider": "github-models", "category": "OpenAI (Free)"},
-                    {"id": "llama-3.3-70b", "name": "Llama 3.3 70B", "provider": "github-models", "category": "Meta Llama"},
-                    {"id": "mistral-large", "name": "Mistral Large", "provider": "github-models", "category": "Mistral"},
-                    {"id": "deepseek-r1", "name": "DeepSeek R1", "provider": "github-models", "category": "DeepSeek"},
+                    {"id": "gpt-4o", "name": "GPT-4o", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "gpt-4.1", "name": "GPT-4.1", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "o1", "name": "o1 (Reasoning)", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "o1-mini", "name": "o1 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "o3-mini", "name": "o3 Mini", "provider": "github-copilot", "category": "OpenAI (Copilot)"},
+                    {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
+                    {"id": "claude-3.7-sonnet", "name": "Claude 3.7 Sonnet", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
+                    {"id": "claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "github-copilot", "category": "Anthropic (Copilot)"},
+                    {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "provider": "github-copilot", "category": "Google (Copilot)"},
+                    {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "github-copilot", "category": "Google (Copilot)"},
+                ])
+            
+            # Add GitHub Models API (FREE tier) as fallback options
+            if github_token or not model_list:
+                model_list.extend([
+                    {"id": "gpt-4o-mini", "name": "GPT-4o mini (Free)", "provider": "github-models", "category": "OpenAI (Free)"},
+                    {"id": "gpt-4o", "name": "GPT-4o (Free)", "provider": "github-models", "category": "OpenAI (Free)"},
+                    {"id": "llama-3.3-70b", "name": "Llama 3.3 70B", "provider": "github-models", "category": "Meta Llama (Free)"},
+                    {"id": "llama-3.1-405b", "name": "Llama 3.1 405B", "provider": "github-models", "category": "Meta Llama (Free)"},
+                    {"id": "mistral-large", "name": "Mistral Large", "provider": "github-models", "category": "Mistral (Free)"},
+                    {"id": "deepseek-r1", "name": "DeepSeek R1", "provider": "github-models", "category": "DeepSeek (Free)"},
+                    {"id": "deepseek-v3", "name": "DeepSeek V3", "provider": "github-models", "category": "DeepSeek (Free)"},
                 ])
             
             return {
@@ -223,7 +243,7 @@ class WebServer:
                 "current": self.current_model,
                 "provider": provider,
                 "has_copilot": has_copilot,
-                "dynamic": len(model_list) > 0
+                "dynamic": copilot_models_fetched
             }
         
         @self.fastapi.post("/api/chat")

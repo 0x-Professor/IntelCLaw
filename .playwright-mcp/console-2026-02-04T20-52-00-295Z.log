@@ -1,0 +1,12 @@
+[     752ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8765/favicon.ico:0
+[  261800ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8765/static/js/websocket.js:34
+[  261801ms] [ERROR] [WS] Error: Event @ http://127.0.0.1:8765/static/js/websocket.js:91
+[  265848ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8765/static/js/websocket.js:34
+[  265848ms] [ERROR] [WS] Error: Event @ http://127.0.0.1:8765/static/js/websocket.js:91
+[  271906ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8765/static/js/websocket.js:34
+[  271906ms] [ERROR] [WS] Error: Event @ http://127.0.0.1:8765/static/js/websocket.js:91
+[  281970ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8765/static/js/websocket.js:34
+[  281970ms] [ERROR] [WS] Error: Event @ http://127.0.0.1:8765/static/js/websocket.js:91
+[  300008ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8765/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8765/static/js/websocket.js:34
+[  300009ms] [ERROR] [WS] Error: Event @ http://127.0.0.1:8765/static/js/websocket.js:91
+[  300011ms] [ERROR] [WS] Max reconnection attempts reached @ http://127.0.0.1:8765/static/js/websocket.js:86
