@@ -1984,3 +1984,7 @@ content.list[union[str,dict[any,any]]]
 2026-02-05 01:23:54 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:613 - Calling GitHub Models API with model: gpt-4o
 2026-02-05 01:23:54 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:615 - With 11 tools available
 2026-02-05 01:23:55 | ERROR    | intelclaw.integrations.llm_provider:ainvoke:517 - Primary LLM error: GitHub Models API rate limit exceeded - try again later
+2026-02-05 01:25:16 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 3
+2026-02-05 01:25:16 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 2
+2026-02-05 01:25:16 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 1
+2026-02-05 01:25:16 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 0

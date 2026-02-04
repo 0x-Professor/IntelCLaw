@@ -21,23 +21,44 @@ class CopilotIntegration:
     GitHub Copilot integration for IntelCLaw.
     
     Features:
-    - Model switching
+    - Model switching (supports Copilot API models like gpt-4o, o1, etc.)
     - Context synchronization
     - Suggestion handling
     - Settings management
+    
+    Two modes:
+    1. Copilot API - Uses Copilot subscription models (gpt-4o, o1, etc.)
+    2. GitHub Models API - Free tier with rate limits (gpt-4o-mini, llama, etc.)
     """
     
     # VS Code Copilot settings path
     VSCODE_SETTINGS_PATH = Path(os.path.expanduser("~")) / "AppData" / "Roaming" / "Code" / "User" / "settings.json"
     
-    # Available models
-    AVAILABLE_MODELS = {
-        "gpt-4o": "GPT-4o - Best overall performance",
-        "gpt-4o-mini": "GPT-4o Mini - Fast and efficient",
-        "claude-3.5-sonnet": "Claude 3.5 Sonnet - Excellent for coding",
-        "o1-preview": "O1 Preview - Advanced reasoning",
-        "o1-mini": "O1 Mini - Fast reasoning",
+    # GitHub Copilot models (available via subscription)
+    # Based on OpenClaw's supported Copilot models
+    COPILOT_MODELS = {
+        "gpt-4o": "GPT-4o - Best overall performance (Copilot)",
+        "gpt-4.1": "GPT-4.1 - Latest GPT-4 (Copilot)",
+        "gpt-4.1-mini": "GPT-4.1 Mini - Fast and efficient (Copilot)",
+        "gpt-4.1-nano": "GPT-4.1 Nano - Ultra fast (Copilot)",
+        "o1": "O1 - Advanced reasoning (Copilot)",
+        "o1-mini": "O1 Mini - Fast reasoning (Copilot)",
+        "o3-mini": "O3 Mini - Smaller O3 model (Copilot)",
     }
+    
+    # GitHub Models API models (free, rate-limited)
+    FREE_MODELS = {
+        "gpt-4o-mini": "GPT-4o Mini - Free tier (rate-limited)",
+        "gpt-4o": "GPT-4o - Free tier (rate-limited)",
+        "llama-3.3-70b": "Llama 3.3 70B - Meta (free)",
+        "deepseek-r1": "DeepSeek R1 - Reasoning (free)",
+        "phi-4": "Phi-4 - Microsoft (free)",
+    }
+    
+    @property
+    def AVAILABLE_MODELS(self) -> Dict[str, str]:
+        """Get all available models combining Copilot and free models."""
+        return {**self.COPILOT_MODELS, **self.FREE_MODELS}
     
     def __init__(self, config: "ConfigManager"):
         """
@@ -70,18 +91,20 @@ class CopilotIntegration:
         """
         Change the Copilot model.
         
+        Supports both Copilot API models (require subscription) and
+        free GitHub Models API models.
+        
         Args:
-            model: Model name
+            model: Model name (e.g., 'gpt-4o', 'gpt-4o-mini', 'llama-3.3-70b')
             
         Returns:
             Result with old and new model
         """
-        if model not in self.AVAILABLE_MODELS:
-            return {
-                "success": False,
-                "error": f"Unknown model: {model}",
-                "available": list(self.AVAILABLE_MODELS.keys())
-            }
+        all_models = self.AVAILABLE_MODELS
+        
+        # Allow custom models not in the list
+        if model not in all_models:
+            logger.info(f"Using custom model: {model}")
         
         old_model = self._current_model
         self._current_model = model
@@ -96,11 +119,16 @@ class CopilotIntegration:
         
         logger.info(f"Copilot model changed: {old_model} -> {model}")
         
+        # Get description for known models
+        description = self.AVAILABLE_MODELS.get(model, f"Custom model: {model}")
+        
         return {
             "success": True,
             "old_model": old_model,
             "new_model": model,
-            "description": self.AVAILABLE_MODELS[model]
+            "description": description,
+            "is_copilot_model": model in self.COPILOT_MODELS,
+            "is_free_model": model in self.FREE_MODELS,
         }
     
     async def _update_vscode_settings(self, model: str) -> bool:
@@ -134,9 +162,28 @@ class CopilotIntegration:
             logger.warning(f"Failed to update VS Code settings: {e}")
             return False
     
-    async def get_available_models(self) -> Dict[str, str]:
-        """Get list of available models."""
-        return self.AVAILABLE_MODELS.copy()
+    async def get_available_models(self) -> Dict[str, Any]:
+        """
+        Get list of available models with categories.
+        
+        Returns models organized by:
+        - copilot: Models available via Copilot subscription
+        - free: Models available via free GitHub Models API
+        """
+        return {
+            "copilot_models": self.COPILOT_MODELS.copy(),
+            "free_models": self.FREE_MODELS.copy(),
+            "all": self.AVAILABLE_MODELS,
+            "current": self._current_model,
+        }
+    
+    async def get_copilot_models(self) -> Dict[str, str]:
+        """Get models available via Copilot subscription."""
+        return self.COPILOT_MODELS.copy()
+    
+    async def get_free_models(self) -> Dict[str, str]:
+        """Get models available via free GitHub Models API."""
+        return self.FREE_MODELS.copy()
     
     async def enable(self) -> None:
         """Enable Copilot integration."""
