@@ -109,39 +109,8 @@
                 
                 <div class="header-actions">
                     <select class="model-selector" id="modelSelector">
-                        <optgroup label="OpenAI (Recommended)">
-                            <option value="gpt-4o-mini" selected>GPT-4o mini (default)</option>
-                            <option value="gpt-4o">GPT-4o</option>
-                            <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                            <option value="gpt-4">GPT-4</option>
-                            <option value="o1-preview">o1-preview</option>
-                            <option value="o1-mini">o1-mini</option>
-                        </optgroup>
-                        <optgroup label="Meta Llama">
-                            <option value="llama-3.3-70b">Llama 3.3 70B</option>
-                            <option value="llama-3.2-90b">Llama 3.2 90B Vision</option>
-                            <option value="llama-3.1-405b">Llama 3.1 405B</option>
-                            <option value="llama-3.1-70b">Llama 3.1 70B</option>
-                            <option value="llama-3.1-8b">Llama 3.1 8B</option>
-                        </optgroup>
-                        <optgroup label="Mistral">
-                            <option value="mistral-large">Mistral Large</option>
-                            <option value="mistral-small">Mistral Small</option>
-                            <option value="mistral-nemo">Mistral Nemo</option>
-                        </optgroup>
-                        <optgroup label="DeepSeek">
-                            <option value="deepseek-r1">DeepSeek R1</option>
-                            <option value="deepseek-v3">DeepSeek V3</option>
-                        </optgroup>
-                        <optgroup label="Microsoft">
-                            <option value="phi-4">Phi-4</option>
-                            <option value="phi-3.5-moe">Phi-3.5 MoE</option>
-                            <option value="phi-3.5-mini">Phi-3.5 Mini</option>
-                        </optgroup>
-                        <optgroup label="Cohere">
-                            <option value="cohere-command-r">Command R</option>
-                            <option value="cohere-command-r-plus">Command R+</option>
-                        </optgroup>
+                        <!-- Models loaded dynamically from /api/models -->
+                        <option value="" disabled selected>Loading models...</option>
                     </select>
                     
                     <button class="header-btn" id="settingsToggle" title="Settings">
