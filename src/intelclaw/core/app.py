@@ -12,6 +12,16 @@ from typing import Optional
 
 from loguru import logger
 
+# Qt imports for event loop integration
+try:
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import QTimer
+    import qasync
+    PYQT_AVAILABLE = True
+except ImportError:
+    PYQT_AVAILABLE = False
+    qasync = None
+
 from intelclaw.core.events import EventBus
 from intelclaw.config.manager import ConfigManager
 from intelclaw.agent.orchestrator import AgentOrchestrator
@@ -165,33 +175,34 @@ class IntelCLawApp:
         logger.success("IntelCLaw shutdown complete")
     
     async def run(self) -> None:
-        """Run the main application loop."""
-        await self.startup()
+        """Run the main application loop with Qt integration."""
         
-        # Setup signal handlers
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            asyncio.get_event_loop().add_signal_handler(
-                sig,
-                lambda: asyncio.create_task(self.shutdown())
-            )
+        logger.info("Starting main event loop... Press Ctrl+Shift+Space to open overlay")
         
         # Start background tasks
-        tasks = [
-            asyncio.create_task(self.perception.run()),
-            asyncio.create_task(self.agent.run()),
-            asyncio.create_task(self._monitor_health()),
-        ]
+        async_tasks = []
         
-        # Wait for shutdown signal
-        await self._shutdown_event.wait()
+        if self.perception:
+            async_tasks.append(asyncio.create_task(self.perception.run()))
+        if self.agent:
+            async_tasks.append(asyncio.create_task(self.agent.run()))
+        async_tasks.append(asyncio.create_task(self._monitor_health()))
         
-        # Cancel all tasks
-        for task in tasks:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        try:
+            # Wait for shutdown signal
+            await self._shutdown_event.wait()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # Cleanup
+            for task in async_tasks:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            
+            await self.shutdown()
     
     async def _monitor_health(self) -> None:
         """Monitor system health and resource usage."""

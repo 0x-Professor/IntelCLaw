@@ -33,12 +33,10 @@ dependencies = [
     "anthropic>=0.34.0",
     "google-generativeai>=0.8.0",
     "instructor>=1.4.0",
-    
     # === Memory & Vector Storage ===
     "mem0ai>=0.1.0",
     "chromadb>=0.5.0",
     "qdrant-client>=1.11.0",
-    
     # === Windows System Integration ===
     "pywin32>=306",
     "pywinauto>=0.6.8",
@@ -46,37 +44,30 @@ dependencies = [
     "keyboard>=0.13.5",
     "pyautogui>=0.9.54",
     "mss>=9.0.1",
-    
     # === Image Processing & OCR ===
     "Pillow>=10.4.0",
     "pytesseract>=0.3.10",
     "opencv-python>=4.10.0",
-    
     # === UI Framework ===
     "PyQt6>=6.7.0",
     "PyQt6-WebEngine>=6.7.0",
-    
     # === MCP & Tools ===
     "mcp>=1.0.0",
     "tavily-python>=0.5.0",
-    
     # === Async & Concurrency ===
     "aiohttp>=3.10.0",
     "aiofiles>=24.1.0",
-    
     # === Web & API ===
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "websockets>=13.0",
     "httpx>=0.27.0",
-    
     # === Data Validation & Config ===
     "pydantic>=2.9.0",
     "pydantic-settings>=2.5.0",
     "python-dotenv>=1.0.1",
     "pyyaml>=6.0.2",
     "tomli>=2.0.1",
-    
     # === Utilities ===
     "loguru>=0.7.2",
     "tenacity>=9.0.0",
@@ -85,6 +76,8 @@ dependencies = [
     "watchdog>=4.0.0",
     "cryptography>=43.0.0",
     "keyring>=25.3.0",
+    "qasync>=0.28.0",
+    "aioconsole>=0.8.2",
 ]
 
 [project.optional-dependencies]

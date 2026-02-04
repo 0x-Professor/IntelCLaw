@@ -52,11 +52,36 @@ async def main():
         app = IntelCLawApp()
         await app.startup()
         
+        # Run the main event loop
+        await app.run()
+        
     except KeyboardInterrupt:
         logger.info("Shutdown requested via keyboard")
     except Exception as e:
         logger.exception(f"Fatal error: {e}")
         sys.exit(1)
+
+
+def run_with_qt():
+    """Run with Qt event loop integration using qasync."""
+    try:
+        from PyQt6.QtWidgets import QApplication
+        import qasync
+        
+        # Create Qt application
+        qt_app = QApplication(sys.argv)
+        
+        # Create qasync event loop
+        loop = qasync.QEventLoop(qt_app)
+        asyncio.set_event_loop(loop)
+        
+        # Run the async main
+        with loop:
+            loop.run_until_complete(main())
+            
+    except ImportError:
+        # Fallback to regular asyncio
+        asyncio.run(main())
 
 
 def cli():
@@ -127,8 +152,8 @@ def cli():
     if args.config:
         os.environ["INTELCLAW_CONFIG"] = args.config
     
-    # Run the application
-    asyncio.run(main())
+    # Run the application with Qt integration
+    run_with_qt()
 
 
 if __name__ == "__main__":
