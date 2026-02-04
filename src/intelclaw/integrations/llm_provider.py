@@ -578,15 +578,18 @@ class CopilotLLM:
         response = await self._anthropic_fallback.messages.create(**kwargs)
         return response.content[0].text
     
-    async def _call_github_models_api(self, messages: List[Dict[str, str]]) -> str:
-        """Call the GitHub Models API (Azure AI inference endpoint)."""
+    async def _call_github_models_api(self, messages: List[Dict[str, str]], include_tools: bool = True) -> Dict[str, Any]:
+        """
+        Call the GitHub Models API (Azure AI inference endpoint).
+        
+        Returns:
+            Dict with 'content' and optionally 'tool_calls'
+        """
         import aiohttp
         
         if not self._github_token:
             raise Exception("GitHub token not available - set GITHUB_TOKEN environment variable")
         
-        # GitHub Models API uses Azure-hosted inference endpoint
-        # Authentication requires a GitHub Personal Access Token (PAT)
         headers = {
             "Authorization": f"Bearer {self._github_token}",
             "Content-Type": "application/json",
@@ -599,8 +602,14 @@ class CopilotLLM:
             "max_tokens": 4096,
         }
         
+        # Add tools if bound and requested
+        if include_tools and hasattr(self, '_tools_schema') and self._tools_schema:
+            payload["tools"] = self._tools_schema
+            payload["tool_choice"] = "auto"
+        
         logger.debug(f"Calling GitHub Models API with model: {self._github_model_id}")
-        logger.debug(f"API URL: {GITHUB_MODELS_API_URL}")
+        if include_tools and hasattr(self, '_tools_schema'):
+            logger.debug(f"With {len(self._tools_schema)} tools available")
         
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -613,7 +622,26 @@ class CopilotLLM:
                 
                 if response.status == 200:
                     data = json.loads(response_text)
-                    return data["choices"][0]["message"]["content"]
+                    message = data["choices"][0]["message"]
+                    
+                    result = {
+                        "content": message.get("content", ""),
+                        "tool_calls": None
+                    }
+                    
+                    # Parse tool calls if present
+                    if "tool_calls" in message and message["tool_calls"]:
+                        result["tool_calls"] = []
+                        for tc in message["tool_calls"]:
+                            tool_call = {
+                                "id": tc.get("id", f"call_{time.time_ns()}"),
+                                "name": tc["function"]["name"],
+                                "args": json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"]
+                            }
+                            result["tool_calls"].append(tool_call)
+                        logger.info(f"LLM requested {len(result['tool_calls'])} tool calls")
+                    
+                    return result
                 elif response.status == 401:
                     logger.warning("GitHub Models API returned 401 - unauthorized")
                     logger.debug(f"Response: {response_text}")
@@ -665,10 +693,44 @@ class CopilotLLM:
     
     def bind_tools(self, tools: List[Any]) -> "CopilotLLM":
         """Bind tools for function calling - returns self for LangGraph compatibility."""
-        # Store tools for potential use in API calls
+        # Store tools for use in API calls
         self._bound_tools = tools
-        # Return self for chaining (tools handled separately)
+        # Convert LangChain tools to OpenAI function format
+        self._tools_schema = self._convert_tools_to_schema(tools)
+        # Return self for chaining
         return self
+    
+    def _convert_tools_to_schema(self, tools: List[Any]) -> List[Dict]:
+        """Convert LangChain tools to OpenAI function calling schema."""
+        functions = []
+        for tool in tools:
+            try:
+                # Get tool schema
+                if hasattr(tool, 'args_schema') and tool.args_schema:
+                    # Pydantic schema
+                    schema = tool.args_schema.schema()
+                    properties = schema.get("properties", {})
+                    required = schema.get("required", [])
+                else:
+                    properties = {}
+                    required = []
+                
+                func = {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description or f"Tool: {tool.name}",
+                        "parameters": {
+                            "type": "object",
+                            "properties": properties,
+                            "required": required
+                        }
+                    }
+                }
+                functions.append(func)
+            except Exception as e:
+                logger.warning(f"Could not convert tool {tool.name} to schema: {e}")
+        return functions
 
 
 class CopilotResponse:
