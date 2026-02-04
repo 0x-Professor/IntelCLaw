@@ -1326,3 +1326,130 @@ For troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/erro
 2026-02-05 00:21:13 | DEBUG    | intelclaw.integrations.llm_provider:_call_github_models_api:557 - API URL: https://models.inference.ai.azure.com/chat/completions
 2026-02-05 00:21:35 | INFO     | intelclaw.web.server:websocket_endpoint:199 - New session: session_1770232895098
 2026-02-05 01:02:25 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 1
+2026-02-05 01:08:48 | INFO     | main:run_web_server:342 - ==================================================
+2026-02-05 01:08:48 | INFO     | main:run_web_server:343 - IntelCLaw - Web Interface
+2026-02-05 01:08:48 | INFO     | main:run_web_server:344 - ==================================================
+2026-02-05 01:08:48 | INFO     | intelclaw.core.app:__init__:75 - IntelCLaw application instance created
+2026-02-05 01:08:48 | INFO     | intelclaw.core.app:startup:79 - Starting IntelCLaw...
+2026-02-05 01:08:48 | INFO     | intelclaw.config.manager:load:124 - Configuration loaded from config.yaml
+2026-02-05 01:08:48 | DEBUG    | intelclaw.config.manager:_apply_env_overrides:227 - Applied env override: INTELCLAW_DEBUG
+2026-02-05 01:08:48 | DEBUG    | intelclaw.config.manager:_apply_env_overrides:227 - Applied env override: TAVILY_API_KEY
+2026-02-05 01:08:48 | DEBUG    | intelclaw.config.manager:_apply_env_overrides:227 - Applied env override: GITHUB_TOKEN
+2026-02-05 01:08:48 | INFO     | intelclaw.core.app:startup:84 - Configuration loaded
+2026-02-05 01:08:48 | INFO     | intelclaw.security.manager:initialize:55 - Initializing security manager...
+2026-02-05 01:08:48 | INFO     | intelclaw.security.manager:initialize:67 - Security manager initialized
+2026-02-05 01:08:48 | INFO     | intelclaw.core.app:startup:89 - Security manager initialized
+2026-02-05 01:08:48 | DEBUG    | intelclaw.memory.manager:__init__:68 - MemoryManager created
+2026-02-05 01:08:48 | INFO     | intelclaw.memory.manager:initialize:72 - Initializing memory system...
+2026-02-05 01:08:48 | INFO     | intelclaw.memory.working_memory:initialize:58 - Working memory initialized at data\working_memory.db
+2026-02-05 01:08:48 | WARNING  | intelclaw.memory.long_term:initialize:91 - Mem0 initialization failed: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable, using fallback
+2026-02-05 01:08:48 | INFO     | intelclaw.memory.vector_store:initialize:78 - Vector store initialized: intelclaw
+2026-02-05 01:08:48 | SUCCESS  | intelclaw.memory.manager:initialize:102 - Memory system initialized
+2026-02-05 01:08:48 | INFO     | intelclaw.core.app:startup:94 - Memory system initialized
+2026-02-05 01:08:48 | INFO     | intelclaw.memory.data_store:initialize:150 - DataStore initialized
+2026-02-05 01:08:48 | INFO     | intelclaw.core.app:startup:99 - Data store initialized
+2026-02-05 01:08:48 | DEBUG    | intelclaw.perception.manager:__init__:91 - PerceptionManager created
+2026-02-05 01:08:48 | INFO     | intelclaw.perception.manager:initialize:95 - Initializing perception layer...
+2026-02-05 01:08:48 | INFO     | intelclaw.perception.screen_capture:initialize:62 - Screen capture initialized with 1 monitors
+2026-02-05 01:08:48 | WARNING  | intelclaw.perception.ocr:initialize:55 - Tesseract not found: tesseract is not installed or it's not in your PATH. See README file for more information.. Install from https://github.com/tesseract-ocr/tesseract
+2026-02-05 01:08:48 | WARNING  | intelclaw.perception.ui_automation:initialize:50 - UI Automation not available (win32 not installed)
+2026-02-05 01:08:48 | INFO     | intelclaw.perception.activity_monitor:initialize:92 - Initializing activity monitor...
+2026-02-05 01:08:48 | DEBUG    | intelclaw.perception.activity_monitor:initialize:99 - Keyboard activity tracking enabled
+2026-02-05 01:08:48 | INFO     | intelclaw.perception.activity_monitor:initialize:104 - Activity monitor initialized
+2026-02-05 01:08:48 | SUCCESS  | intelclaw.perception.manager:initialize:130 - Perception layer initialized
+2026-02-05 01:08:48 | INFO     | intelclaw.core.app:startup:104 - Perception layer initialized
+2026-02-05 01:08:48 | DEBUG    | intelclaw.tools.registry:__init__:52 - ToolRegistry created
+2026-02-05 01:08:48 | INFO     | intelclaw.tools.registry:initialize:56 - Initializing tool registry...
+2026-02-05 01:08:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: tavily_search
+2026-02-05 01:08:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_read
+2026-02-05 01:08:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_write
+2026-02-05 01:08:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: file_search
+2026-02-05 01:08:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: screenshot
+2026-02-05 01:08:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: clipboard
+2026-02-05 01:08:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: launch_app
+2026-02-05 01:08:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: web_scrape
+2026-02-05 01:08:48 | DEBUG    | intelclaw.tools.registry:register:82 - Registered tool: shell_command
+2026-02-05 01:08:48 | ERROR    | main:run_web_server:373 - Fatal error: type object 'ToolCategory' has no attribute 'CODE'
+Traceback (most recent call last):
+
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+
+  File "M:\IntelCLaw\src\intelclaw\__main__.py", line 10, in <module>
+    cli()
+    └ <function cli at 0x000001C40B1F2660>
+
+  File "M:\IntelCLaw\main.py", line 306, in cli
+    asyncio.run(run_web_server(args.host, args.port))
+    │       │   │              │    │     │    └ 8765
+    │       │   │              │    │     └ Namespace(command='gateway', config='config.yaml', safe_mode=False, reset_memory=False, debug=False, auth=False, logout=False...
+    │       │   │              │    └ '127.0.0.1'
+    │       │   │              └ Namespace(command='gateway', config='config.yaml', safe_mode=False, reset_memory=False, debug=False, auth=False, logout=False...
+    │       │   └ <function run_web_server at 0x000001C40B1F2700>
+    │       └ <function run at 0x000001C46A079A80>
+    └ <module 'asyncio' from 'C:\\Program Files\\Python313\\Lib\\asyncio\\__init__.py'>
+
+  File "C:\Program Files\Python313\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           │      │   └ <coroutine object run_web_server at 0x000001C40B187400>
+           │      └ <function Runner.run at 0x000001C46A164360>
+           └ <asyncio.runners.Runner object at 0x000001C40B17E510>
+  File "C:\Program Files\Python313\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           │    │     │                  └ <Task pending name='Task-1' coro=<run_web_server() running at M:\IntelCLaw\main.py:373> cb=[_run_until_complete_cb() at C:\Pr...
+           │    │     └ <function BaseEventLoop.run_until_complete at 0x000001C46A15DEE0>
+           │    └ <ProactorEventLoop running=True closed=False debug=False>
+           └ <asyncio.runners.Runner object at 0x000001C40B17E510>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+    self.run_forever()
+    │    └ <function BaseEventLoop.run_forever at 0x000001C46A15DE40>
+    └ <ProactorEventLoop running=True closed=False debug=False>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+    self._run_once()
+    │    └ <function BaseEventLoop._run_once at 0x000001C46A15FC40>
+    └ <ProactorEventLoop running=True closed=False debug=False>
+  File "C:\Program Files\Python313\Lib\asyncio\base_events.py", line 2040, in _run_once
+    handle._run()
+    │      └ <function Handle._run at 0x000001C46A07ADE0>
+    └ <Handle Task.task_wakeup()>
+  File "C:\Program Files\Python313\Lib\asyncio\events.py", line 89, in _run
+    self._context.run(self._callback, *self._args)
+    │    │            │    │           │    └ <member '_args' of 'Handle' objects>
+    │    │            │    │           └ <Handle Task.task_wakeup()>
+    │    │            │    └ <member '_callback' of 'Handle' objects>
+    │    │            └ <Handle Task.task_wakeup()>
+    │    └ <member '_context' of 'Handle' objects>
+    └ <Handle Task.task_wakeup()>
+
+> File "M:\IntelCLaw\main.py", line 357, in run_web_server
+    await app.startup()
+          │   └ <function IntelCLawApp.startup at 0x000001C40B1D9620>
+          └ <intelclaw.core.app.IntelCLawApp object at 0x000001C46A784AD0>
+
+  File "M:\IntelCLaw\src\intelclaw\core\app.py", line 108, in startup
+    await self.tools.initialize()
+          │    │     └ <function ToolRegistry.initialize at 0x000001C40B1AA340>
+          │    └ <intelclaw.tools.registry.ToolRegistry object at 0x000001C40BCF5160>
+          └ <intelclaw.core.app.IntelCLawApp object at 0x000001C46A784AD0>
+
+  File "M:\IntelCLaw\src\intelclaw\tools\registry.py", line 59, in initialize
+    await self._register_builtin_tools()
+          │    └ <function ToolRegistry._register_builtin_tools at 0x000001C40B1AB9C0>
+          └ <intelclaw.tools.registry.ToolRegistry object at 0x000001C40BCF5160>
+
+  File "M:\IntelCLaw\src\intelclaw\tools\registry.py", line 229, in _register_builtin_tools
+    self.register(tool)
+    │    │        └ <intelclaw.tools.builtin.shell.CodeExecutionTool object at 0x000001C40BCF74D0>
+    │    └ <function ToolRegistry.register at 0x000001C40B1AA2A0>
+    └ <intelclaw.tools.registry.ToolRegistry object at 0x000001C40BCF5160>
+
+  File "M:\IntelCLaw\src\intelclaw\tools\registry.py", line 78, in register
+    definition = tool.definition
+                 │    └ <property object at 0x000001C40C08C040>
+                 └ <intelclaw.tools.builtin.shell.CodeExecutionTool object at 0x000001C40BCF74D0>
+
+  File "M:\IntelCLaw\src\intelclaw\tools\builtin\shell.py", line 161, in definition
+    category=ToolCategory.CODE,
+             └ <enum 'ToolCategory'>
+
+AttributeError: type object 'ToolCategory' has no attribute 'CODE'

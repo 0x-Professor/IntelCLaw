@@ -18,6 +18,7 @@ class ToolCategory(str, Enum):
     PRODUCTIVITY = "productivity"
     DEVELOPMENT = "development"
     COMMUNICATION = "communication"
+    CODE = "code"  # Code execution tools
     CUSTOM = "custom"
 
 
