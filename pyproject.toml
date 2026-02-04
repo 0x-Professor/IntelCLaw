@@ -78,6 +78,8 @@ dependencies = [
     "keyring>=25.3.0",
     "qasync>=0.28.0",
     "aioconsole>=0.8.2",
+    "jinja2>=3.1.6",
+    "python-multipart>=0.0.22",
 ]
 
 [project.optional-dependencies]
