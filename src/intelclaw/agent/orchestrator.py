@@ -737,12 +737,64 @@ class AgentOrchestrator(BaseAgent):
         
         Complex tasks benefit from structured planning, step-by-step execution,
         and progress tracking via the TaskPlanner.
+        
+        Simple system queries (like "check running tasks") should NOT be complex
+        but still need tool execution. They go through REACT with tool binding.
         """
         msg = (user_message or "").lower()
 
-        # If tools are explicitly required, treat as complex for reliable execution
+        # =====================================================================
+        # SIMPLE SYSTEM QUERIES → NOT complex (handled by REACT with tools)
+        # These are single-step tool operations that don't need a planner.
+        # =====================================================================
+        simple_system_patterns = [
+            # Process queries
+            "running task", "running process", "list process", "show process",
+            "check process", "check task", "check running", "what is running",
+            "what's running", "whats running", "active process", "active task",
+            "checkout the running", "check the running", "top process",
+            "kill process", "end task", "stop process",
+            # Service queries
+            "list service", "show service", "check service", "service status",
+            "start service", "stop service", "restart service",
+            # Network queries
+            "network adapter", "ip address", "listening port", "active connection",
+            "ping ", "public ip", "wifi profile",
+            # System info queries
+            "system info", "cpu usage", "memory usage", "ram usage", "gpu info",
+            "battery", "uptime", "hardware info", "system performance",
+            "disk space", "free space",
+            # User queries
+            "current user", "list user", "user session",
+            # Simple queries
+            "clipboard", "screenshot", "firewall status",
+            "installed app", "installed program", "startup app",
+            "environment variable", "path variable",
+            "windows update", "pending update", "installed update",
+            "event log", "system log",
+        ]
+        
+        # If the message matches a simple system pattern and is short, it's NOT complex
+        if len(msg) < 200 and any(pattern in msg for pattern in simple_system_patterns):
+            # But if it has multiple "and" or sequential indicators, it IS complex
+            if msg.count(" and ") < 2 and not any(kw in msg for kw in ["then", "after that", "first", "second"]):
+                return False
+
+        # If tools are explicitly required via multi-step phrasing, treat as complex
         if self._requires_tool_use(user_message):
-            return True
+            # Only complex if message is long or has multi-step indicators
+            multi_step_indicators = [
+                "and then", "then", "after that", "first", "second", "third",
+                "step by step", "multi-step", "multiple steps", "workflow",
+            ]
+            if any(ind in msg for ind in multi_step_indicators):
+                return True
+            if len(msg) > 300:
+                return True
+            if msg.count(" and ") >= 2:
+                return True
+            # Single tool operation — not complex
+            return False
         
         # Strong indicators of complex multi-step tasks
         complex_indicators = [
