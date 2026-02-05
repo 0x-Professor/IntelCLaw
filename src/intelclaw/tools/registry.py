@@ -272,6 +272,17 @@ class ToolRegistry:
             WindowsUIAutomationTool,
             WindowsCIMTool,
         )
+        from intelclaw.tools.builtin.windows_extended import (
+            ProcessManagementTool,
+            NetworkInfoTool,
+            DiskManagementTool,
+            FirewallTool,
+            InstalledAppsTool,
+            EnvironmentTool,
+            WindowsUpdateTool,
+            SystemPerformanceTool,
+            UserSecurityTool,
+        )
         
         builtin_tools = [
             # Search tools
@@ -297,13 +308,23 @@ class ToolRegistry:
             CodeExecutionTool(),
             PipInstallTool(),
             PowerShellTool(),
-            # Windows native tools
+            # Windows native tools (core)
             WindowsServicesTool(),
             WindowsTasksTool(),
             WindowsRegistryTool(),
             WindowsEventLogTool(),
             WindowsUIAutomationTool(),
             WindowsCIMTool(),
+            # Windows extended tools
+            ProcessManagementTool(),
+            NetworkInfoTool(),
+            DiskManagementTool(),
+            FirewallTool(),
+            InstalledAppsTool(),
+            EnvironmentTool(),
+            WindowsUpdateTool(),
+            SystemPerformanceTool(),
+            UserSecurityTool(),
         ]
         
         for tool in builtin_tools:
