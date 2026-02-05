@@ -651,13 +651,63 @@ class AgentOrchestrator(BaseAgent):
             return False
         
         action_phrases = [
+            # Web / search
             "search the web", "search web", "web search", "look up", "browse the web",
+            # File operations
             "save to", "write to", "write a file", "create a file", "create file",
             "save in", "save as", "export to",
             "delete file", "remove file", "move file", "copy file", "rename file",
             "list files", "list directory", "open file", "read file",
+            # Shell / command
             "run command", "execute command", "shell command", "powershell",
             "download", "install", "scrape", "fetch url", "collect urls",
+            # Process / task management (THE KEY FIX for "check running tasks")
+            "running task", "running process", "running app", "running program",
+            "running service", "running software",
+            "list process", "list task", "show process", "show task",
+            "check process", "check task", "check running",
+            "kill process", "kill task", "stop process", "end task",
+            "task manager", "tasklist", "get-process", "top process",
+            "what is running", "what's running", "whats running",
+            "active process", "active task", "active app",
+            "checkout the running", "check the running",
+            # Windows services
+            "list service", "show service", "check service", "start service",
+            "stop service", "restart service", "service status",
+            # Windows scheduled tasks
+            "scheduled task", "task scheduler", "cron job",
+            # Registry
+            "registry", "reg key", "regedit",
+            # Event log
+            "event log", "eventlog", "windows log", "system log", "error log",
+            # Network
+            "network", "ip address", "ping", "traceroute", "wifi",
+            "port", "listening port", "connection", "active connection",
+            "firewall", "firewall rule",
+            # Disk / storage
+            "disk space", "disk usage", "storage", "free space", "drive",
+            "large file", "folder size",
+            # System info / performance
+            "system info", "cpu usage", "memory usage", "ram usage",
+            "gpu info", "battery", "uptime", "hardware info",
+            "system performance", "system monitor",
+            # Apps / software
+            "installed app", "installed program", "installed software",
+            "startup app", "startup program",
+            # Environment
+            "environment variable", "env var", "path variable",
+            # Users / security
+            "user account", "local user", "current user", "user group",
+            "user session", "logged in user",
+            # Windows update
+            "windows update", "system update", "pending update",
+            # Screenshot / clipboard
+            "take screenshot", "screenshot", "clipboard", "copy to clipboard",
+            # UI Automation
+            "click button", "click on", "automate ui", "find window",
+            "window title", "ui automation",
+            # WMI/CIM
+            "wmi", "cim", "win32_",
         ]
         if any(phrase in msg for phrase in action_phrases):
             return True
@@ -670,6 +720,14 @@ class AgentOrchestrator(BaseAgent):
         if "current directory" in msg or "this directory" in msg or "this folder" in msg:
             if any(word in msg for word in ["save", "write", "create", "output", "export"]):
                 return True
+        
+        # PowerShell cmdlet patterns (Get-Process, Get-Service, etc.)
+        if re.search(r"\b(get|set|start|stop|restart|new|remove|enable|disable)-(process|service|scheduledtask|netfirewallrule|item|childitem|content|hotfix|appxpackage|localuser|localgroup|netadapter|nettcpconnection|ciminstance)", msg, re.IGNORECASE):
+            return True
+        
+        # Windows-specific command patterns
+        if re.search(r"\b(tasklist|taskkill|netstat|ipconfig|systeminfo|wmic|sfc|dism|chkdsk|diskpart)\b", msg, re.IGNORECASE):
+            return True
         
         return False
     
@@ -1321,24 +1379,113 @@ You MUST use tools when the user asks you to perform actions. DO NOT just explai
 AVAILABLE TOOLS: {tool_list_str}
 
 KEY TOOL MAPPINGS:
-- To DELETE a file: use "file_delete" with {{"path": "filename"}}
-- To CREATE/WRITE a file: use "file_write" with {{"path": "filename", "content": "..."}}
-- To READ a file: use "file_read" with {{"path": "filename"}}
-- To SEARCH for files: use "file_search" with {{"directory": ".", "pattern": "*.md"}}
-- To LIST directory: use "list_directory" with {{"path": "."}}
-- To MOVE/RENAME: use "file_move" with {{"source": "old", "destination": "new"}}
-- To COPY: use "file_copy" with {{"source": "src", "destination": "dst"}}
-- To WEB SEARCH: use "tavily_search" with {{"query": "search terms"}}
-- To RUN COMMAND: use "shell_command" with {{"command": "..."}}
-- To SCRAPE WEBSITE: use "web_scrape" with {{"url": "..."}}
-- To GET CURRENT DIRECTORY: use "get_cwd"
+
+### File Operations
+- DELETE a file: use "file_delete" with {{"path": "filename"}}
+- CREATE/WRITE a file: use "file_write" with {{"path": "filename", "content": "..."}}
+- READ a file: use "file_read" with {{"path": "filename"}}
+- SEARCH for files: use "file_search" with {{"directory": ".", "pattern": "*.md"}}
+- LIST directory: use "list_directory" with {{"path": "."}}
+- MOVE/RENAME: use "file_move" with {{"source": "old", "destination": "new"}}
+- COPY: use "file_copy" with {{"source": "src", "destination": "dst"}}
+- GET CURRENT DIR: use "get_cwd"
+
+### Search & Web
+- WEB SEARCH: use "tavily_search" with {{"query": "search terms"}}
+- SCRAPE WEBSITE: use "web_scrape" with {{"url": "..."}}
+
+### Shell & Code
+- RUN COMMAND: use "shell_command" with {{"command": "..."}}
+- POWERSHELL: use "powershell" with {{"script": "..."}}
+- EXECUTE CODE: use "execute_code" with {{"code": "..."}}
+- PIP INSTALL: use "pip_install" with {{"packages": ["pkg1"]}}
+
+### Process & Task Management (CRITICAL for system queries)
+- CHECK RUNNING TASKS/PROCESSES: use "process_management" with {{"action": "list"}} or {{"action": "top_cpu"}} or {{"action": "top_memory"}}
+- FIND A PROCESS: use "process_management" with {{"action": "find", "name": "chrome"}}
+- KILL A PROCESS: use "process_management" with {{"action": "kill", "pid": 1234}} or {{"action": "kill", "name": "notepad"}}
+- PROCESS DETAILS: use "process_management" with {{"action": "details", "pid": 1234}}
+- PROCESS TREE: use "process_management" with {{"action": "tree"}}
+
+### Windows Services
+- LIST SERVICES: use "windows_services" with {{"action": "list"}}
+- SERVICE STATUS: use "windows_services" with {{"action": "get", "name": "svcname"}}
+- START/STOP/RESTART: use "windows_services" with {{"action": "start", "name": "svcname"}}
+
+### Scheduled Tasks
+- LIST TASKS: use "windows_tasks" with {{"action": "list"}}
+- CREATE TASK: use "windows_tasks" with {{"action": "create", "name": "...", "action_path": "...", "schedule": "daily", "start_time": "09:00"}}
+
+### Registry
+- READ REGISTRY: use "windows_registry" with {{"action": "get", "path": "HKLM:\\...", "name": "value"}}
+- LIST KEYS: use "windows_registry" with {{"action": "list_keys", "path": "HKLM:\\..."}}
+
+### Event Logs
+- QUERY EVENTS: use "windows_eventlog" with {{"action": "query", "log_name": "System", "levels": ["Error", "Warning"]}}
+- LIST LOGS: use "windows_eventlog" with {{"action": "list_logs"}}
+
+### Network
+- NETWORK ADAPTERS: use "network_info" with {{"action": "adapters"}}
+- ACTIVE CONNECTIONS: use "network_info" with {{"action": "connections"}}
+- LISTENING PORTS: use "network_info" with {{"action": "listening"}}
+- PING: use "network_info" with {{"action": "ping", "target": "google.com"}}
+- PUBLIC IP: use "network_info" with {{"action": "public_ip"}}
+
+### Disk & Storage
+- DISK SPACE: use "disk_management" with {{"action": "space"}}
+- VOLUMES: use "disk_management" with {{"action": "volumes"}}
+- LARGE FILES: use "disk_management" with {{"action": "large_files", "path": "C:\\"}}
+
+### Firewall
+- FIREWALL STATUS: use "windows_firewall" with {{"action": "status"}}
+- LIST RULES: use "windows_firewall" with {{"action": "list_rules"}}
+
+### System Info & Performance
+- SYSTEM INFO: use "system_info" with {{"info_type": "all"}}
+- PERFORMANCE OVERVIEW: use "system_performance" with {{"action": "overview"}}
+- CPU/MEMORY/GPU: use "system_performance" with {{"action": "cpu"}} or {{"action": "memory"}} or {{"action": "gpu"}}
+- HARDWARE INFO: use "system_performance" with {{"action": "hardware"}}
+- BATTERY: use "system_performance" with {{"action": "battery"}}
+- UPTIME: use "system_performance" with {{"action": "uptime"}}
+
+### Installed Applications
+- LIST APPS: use "installed_apps" with {{"action": "list"}}
+- SEARCH APP: use "installed_apps" with {{"action": "search", "name": "chrome"}}
+- STARTUP APPS: use "installed_apps" with {{"action": "startup_apps"}}
+
+### Environment Variables
+- LIST ENV VARS: use "environment_vars" with {{"action": "list"}}
+- GET PATH: use "environment_vars" with {{"action": "path"}}
+- SET VAR: use "environment_vars" with {{"action": "set", "name": "VAR", "value": "val"}}
+
+### Windows Updates
+- CHECK UPDATES: use "windows_update" with {{"action": "pending"}}
+- INSTALLED UPDATES: use "windows_update" with {{"action": "installed"}}
+
+### Users & Security
+- CURRENT USER: use "user_security" with {{"action": "current_user"}}
+- LIST USERS: use "user_security" with {{"action": "list_users"}}
+
+### WMI/CIM Queries
+- QUERY WMI: use "windows_cim" with {{"class_name": "Win32_OperatingSystem"}}
+
+### UI Automation
+- FIND WINDOW: use "windows_ui_automation" with {{"action": "find_window", "window_title": "..."}}
+- CLICK/INVOKE: use "windows_ui_automation" with {{"action": "click", "window_title": "...", "control_title": "..."}}
+
+### Other
+- SCREENSHOT: use "screenshot"
+- CLIPBOARD: use "clipboard" with {{"action": "read"}} or {{"action": "write", "content": "..."}}
+- LAUNCH APP: use "launch_app" with {{"target": "app_name"}}
 
 IMPORTANT RULES:
-1. When user says "delete file X" -> immediately call file_delete
-2. When user says "find file X" -> immediately call file_search or list_directory
-3. NEVER say "I will delete" without actually calling the tool
+1. When user asks about running tasks/processes -> IMMEDIATELY use process_management tool
+2. When user says "delete file X" -> immediately call file_delete
+3. NEVER say "I will do X" without actually calling the tool
 4. NEVER claim you completed an action unless a tool result confirms it
 5. If a tool fails, report the actual error message
+6. For system queries (processes, services, network, etc.) -> ALWAYS use the appropriate Windows tool
+7. The user is on Windows - use Windows-specific tools and PowerShell commands
 
 Think step by step before taking action.
 Be security-conscious - ask for confirmation for sensitive operations.
