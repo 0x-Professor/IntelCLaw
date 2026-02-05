@@ -1,0 +1,50 @@
+# OpenClaw Setup and First Run (Quick Start)
+
+This guide summarizes the official OpenClaw installation and onboarding flow.
+
+## 1) Prerequisites
+- **Node.js 22+** is required.
+- **Windows users**: WSL2 is recommended in the official install notes.
+
+## 2) Install OpenClaw
+Choose one of the official installer commands:
+
+### Windows (PowerShell)
+```powershell
+iwr https://openclaw.ai/install/windows -UseBasicParsing | iex
+```
+
+### macOS / Linux
+```bash
+curl https://openclaw.ai/install | sh
+```
+
+## 3) Run the Onboarding Wizard
+This sets up authentication, workspace, and the background daemon:
+```bash
+openclaw onboard --install-daemon
+```
+
+## 4) Start the Gateway UI
+The official quickstart uses port `18789`:
+```bash
+openclaw gateway --port 18789
+```
+Then open:
+```
+http://127.0.0.1:18789
+```
+
+## 5) Optional: Open the Dashboard
+```bash
+openclaw dashboard
+```
+
+## 6) Config Location
+Your main config file is stored at:
+```
+~/.openclaw/openclaw.json
+```
+
+---
+If you want, I can add a **“from source”** build section or a **troubleshooting** section tailored to your OS.

@@ -152,6 +152,7 @@ class IntelCLawApp {
             workflowNow: document.getElementById('workflowNow'),
             workflowNext: document.getElementById('workflowNext'),
             workflowSteps: document.getElementById('workflowSteps'),
+            workflowPhases: document.getElementById('workflowPhases'),
             
             // Input
             messageInput: document.getElementById('messageInput'),
@@ -632,7 +633,8 @@ class IntelCLawApp {
         const plan = workflow.plan || [];
         const completed = new Set(workflow.completed_steps || []);
         const currentIndex = workflow.current_step || 0;
-        const progress = workflow.progress || 0;
+        const computedProgress = plan.length > 0 ? (completed.size / plan.length) * 100 : 0;
+        const progress = typeof workflow.progress === 'number' ? workflow.progress : computedProgress;
         const queue = workflow.queue || [];
 
         // Status with color coding
@@ -641,6 +643,28 @@ class IntelCLawApp {
             const statusText = status.toUpperCase();
             this.elements.workflowStatus.textContent = statusText;
             this.elements.workflowStatus.className = 'workflow-status status-' + status.toLowerCase();
+        }
+
+        // Phase chips (Plan → Act → Review)
+        if (this.elements.workflowPhases) {
+            const status = (workflow.status || 'idle').toLowerCase();
+            const phases = this.elements.workflowPhases.querySelectorAll('.phase');
+            phases.forEach(phase => {
+                phase.classList.remove('active', 'done');
+                const name = phase.dataset.phase;
+                if (status === 'thinking' && name === 'plan') {
+                    phase.classList.add('active');
+                } else if (status === 'executing' && name === 'act') {
+                    phase.classList.add('active');
+                } else if ((status === 'idle' || status === 'completed') && name === 'review') {
+                    phase.classList.add('active');
+                }
+            });
+            
+            // Mark done when progress reaches 100
+            if (progress >= 100) {
+                phases.forEach(phase => phase.classList.add('done'));
+            }
         }
 
         // Progress bar
@@ -662,16 +686,23 @@ class IntelCLawApp {
         // Current step (use current_step_title if available)
         const nowStep = workflow.current_step_title || plan[currentIndex] || '-';
         const nextStep = workflow.next_step || plan[currentIndex + 1] || '-';
+        const truncate = (text, max = 140) => {
+            if (!text) return '-';
+            if (text.length <= max) return text;
+            return text.slice(0, max).trim() + '…';
+        };
         
         if (this.elements.workflowNow) {
-            this.elements.workflowNow.textContent = nowStep;
+            this.elements.workflowNow.textContent = truncate(nowStep, 180);
+            this.elements.workflowNow.title = nowStep;
             // Add animation when step changes
             this.elements.workflowNow.classList.remove('step-change');
             void this.elements.workflowNow.offsetWidth; // Force reflow
             this.elements.workflowNow.classList.add('step-change');
         }
         if (this.elements.workflowNext) {
-            this.elements.workflowNext.textContent = nextStep;
+            this.elements.workflowNext.textContent = truncate(nextStep, 180);
+            this.elements.workflowNext.title = nextStep;
         }
 
         // Step count
@@ -706,7 +737,8 @@ class IntelCLawApp {
                 
                 const text = document.createElement('span');
                 text.className = 'step-text';
-                text.textContent = step;
+                text.textContent = truncate(step, 160);
+                text.title = step;
                 
                 li.appendChild(icon);
                 li.appendChild(text);
@@ -729,7 +761,9 @@ class IntelCLawApp {
                     const li = document.createElement('li');
                     li.className = 'queue-item';
                     if (idx === 0) li.classList.add('current');
-                    li.textContent = typeof task === 'string' ? task : task.goal || task.title || 'Task';
+                    const label = typeof task === 'string' ? task : task.goal || task.title || 'Task';
+                    li.textContent = truncate(label, 140);
+                    li.title = label;
                     queueList.appendChild(li);
                 });
                 if (queue.length > 5) {

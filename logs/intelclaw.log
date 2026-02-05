@@ -6649,3 +6649,334 @@ This report examines the la
 2026-02-05 20:56:48 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: gemini-2.5-pro
 2026-02-05 20:56:48 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
 2026-02-05 20:56:52 | DEBUG    | intelclaw.agent.orchestrator:_should_continue:886 - REACT iteration: 2
+2026-02-05 20:59:21 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 1
+2026-02-05 20:59:45 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 0
+2026-02-05 21:02:50 | INFO     | main:run_web_server:342 - ==================================================
+2026-02-05 21:02:50 | INFO     | main:run_web_server:343 - IntelCLaw - Web Interface
+2026-02-05 21:02:50 | INFO     | main:run_web_server:344 - ==================================================
+2026-02-05 21:02:50 | INFO     | intelclaw.core.app:__init__:75 - IntelCLaw application instance created
+2026-02-05 21:02:50 | INFO     | intelclaw.core.app:startup:79 - Starting IntelCLaw...
+2026-02-05 21:02:50 | INFO     | intelclaw.config.manager:load:143 - Configuration loaded from config.yaml
+2026-02-05 21:02:50 | DEBUG    | intelclaw.config.manager:_apply_env_overrides:246 - Applied env override: INTELCLAW_DEBUG
+2026-02-05 21:02:50 | DEBUG    | intelclaw.config.manager:_apply_env_overrides:246 - Applied env override: TAVILY_API_KEY
+2026-02-05 21:02:50 | DEBUG    | intelclaw.config.manager:_apply_env_overrides:246 - Applied env override: GITHUB_TOKEN
+2026-02-05 21:02:50 | INFO     | intelclaw.core.app:startup:84 - Configuration loaded
+2026-02-05 21:02:50 | INFO     | intelclaw.security.manager:initialize:55 - Initializing security manager...
+2026-02-05 21:02:50 | INFO     | intelclaw.security.manager:initialize:67 - Security manager initialized
+2026-02-05 21:02:50 | INFO     | intelclaw.core.app:startup:89 - Security manager initialized
+2026-02-05 21:02:50 | DEBUG    | intelclaw.memory.manager:__init__:72 - MemoryManager created
+2026-02-05 21:02:50 | INFO     | intelclaw.memory.manager:initialize:76 - Initializing memory system...
+2026-02-05 21:02:50 | INFO     | intelclaw.memory.working_memory:initialize:58 - Working memory initialized at data\working_memory.db
+2026-02-05 21:02:50 | WARNING  | intelclaw.memory.long_term:initialize:91 - Mem0 initialization failed: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable, using fallback
+2026-02-05 21:02:50 | INFO     | intelclaw.memory.vector_store:initialize:78 - Vector store initialized: intelclaw
+2026-02-05 21:02:50 | DEBUG    | intelclaw.memory.agentic_rag:__init__:252 - AgenticRAG created
+2026-02-05 21:02:50 | INFO     | intelclaw.memory.agentic_rag:initialize:256 - Initializing Agentic RAG system...
+2026-02-05 21:02:50 | INFO     | intelclaw.memory.agentic_rag:_load_trees:849 - Loaded 5 document trees
+2026-02-05 21:02:53 | SUCCESS  | intelclaw.memory.agentic_rag:initialize:272 - Mem0 Platform API initialized (cloud memory enabled)
+2026-02-05 21:02:53 | INFO     | intelclaw.memory.agentic_rag:initialize:322 - ChromaDB vector store initialized
+2026-02-05 21:02:53 | SUCCESS  | intelclaw.memory.agentic_rag:initialize:328 - Agentic RAG system initialized
+2026-02-05 21:02:53 | INFO     | intelclaw.memory.agentic_rag:index_persona:585 - Indexing persona from: M:\IntelCLaw\persona
+2026-02-05 21:02:53 | INFO     | intelclaw.memory.agentic_rag:index_document:509 - Indexing document: AGENT.md
+2026-02-05 21:02:54 | DEBUG    | intelclaw.memory.agentic_rag:index_persona:605 - Indexed persona file: AGENT.md
+2026-02-05 21:02:54 | INFO     | intelclaw.memory.agentic_rag:index_document:509 - Indexing document: SOUL.md
+2026-02-05 21:02:56 | DEBUG    | intelclaw.memory.agentic_rag:index_persona:605 - Indexed persona file: SOUL.md
+2026-02-05 21:02:56 | INFO     | intelclaw.memory.agentic_rag:index_document:509 - Indexing document: SKILLS.md
+2026-02-05 21:02:57 | DEBUG    | intelclaw.memory.agentic_rag:index_persona:605 - Indexed persona file: SKILLS.md
+2026-02-05 21:02:57 | INFO     | intelclaw.memory.agentic_rag:index_document:509 - Indexing document: TOOLS.md
+2026-02-05 21:02:57 | DEBUG    | intelclaw.memory.agentic_rag:index_persona:605 - Indexed persona file: TOOLS.md
+2026-02-05 21:02:57 | INFO     | intelclaw.memory.agentic_rag:index_document:509 - Indexing document: USER.md
+2026-02-05 21:02:58 | DEBUG    | intelclaw.memory.agentic_rag:index_persona:605 - Indexed persona file: USER.md
+2026-02-05 21:02:58 | SUCCESS  | intelclaw.memory.manager:initialize:120 - Memory system initialized
+2026-02-05 21:02:58 | INFO     | intelclaw.core.app:startup:94 - Memory system initialized
+2026-02-05 21:02:58 | INFO     | intelclaw.memory.data_store:initialize:150 - DataStore initialized
+2026-02-05 21:02:58 | INFO     | intelclaw.core.app:startup:99 - Data store initialized
+2026-02-05 21:02:58 | DEBUG    | intelclaw.perception.manager:__init__:91 - PerceptionManager created
+2026-02-05 21:02:58 | INFO     | intelclaw.perception.manager:initialize:95 - Initializing perception layer...
+2026-02-05 21:02:58 | INFO     | intelclaw.perception.screen_capture:initialize:62 - Screen capture initialized with 1 monitors
+2026-02-05 21:02:58 | WARNING  | intelclaw.perception.ocr:initialize:55 - Tesseract not found: tesseract is not installed or it's not in your PATH. See README file for more information.. Install from https://github.com/tesseract-ocr/tesseract
+2026-02-05 21:02:58 | WARNING  | intelclaw.perception.ui_automation:initialize:50 - UI Automation not available (win32 not installed)
+2026-02-05 21:02:58 | INFO     | intelclaw.perception.activity_monitor:initialize:92 - Initializing activity monitor...
+2026-02-05 21:02:58 | DEBUG    | intelclaw.perception.activity_monitor:initialize:99 - Keyboard activity tracking enabled
+2026-02-05 21:02:58 | INFO     | intelclaw.perception.activity_monitor:initialize:104 - Activity monitor initialized
+2026-02-05 21:02:58 | SUCCESS  | intelclaw.perception.manager:initialize:130 - Perception layer initialized
+2026-02-05 21:02:58 | INFO     | intelclaw.core.app:startup:104 - Perception layer initialized
+2026-02-05 21:02:58 | DEBUG    | intelclaw.tools.registry:__init__:53 - ToolRegistry created
+2026-02-05 21:02:58 | INFO     | intelclaw.tools.registry:initialize:57 - Initializing tool registry...
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: tavily_search
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_read
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_write
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_delete
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_copy
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_move
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_search
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: list_directory
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: get_cwd
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: screenshot
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: clipboard
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: launch_app
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: system_info
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: web_scrape
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: shell_command
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: execute_code
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: pip_install
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: powershell
+2026-02-05 21:02:59 | DEBUG    | intelclaw.tools.registry:_load_mcp_tools:301 - MCP tool loading not yet implemented
+2026-02-05 21:02:59 | SUCCESS  | intelclaw.tools.registry:initialize:68 - Tool registry initialized with 18 tools
+2026-02-05 21:02:59 | INFO     | intelclaw.core.app:startup:109 - Tool registry initialized
+2026-02-05 21:02:59 | INFO     | intelclaw.integrations.copilot:initialize:84 - Copilot integration initialized (model: gpt-4o)
+2026-02-05 21:02:59 | INFO     | intelclaw.integrations.copilot:initialize:276 - Model manager initialized: {'primary': 'gpt-4o', 'fallback': 'gpt-4o-mini', 'coding': 'gpt-4o'}
+2026-02-05 21:02:59 | INFO     | intelclaw.core.app:startup:116 - Copilot integration initialized
+2026-02-05 21:02:59 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'IntelCLaw Orchestrator' initialized
+2026-02-05 21:02:59 | INFO     | intelclaw.agent.orchestrator:__init__:159 - AgentOrchestrator created
+2026-02-05 21:02:59 | INFO     | intelclaw.agent.orchestrator:initialize:163 - Initializing AgentOrchestrator...
+2026-02-05 21:02:59 | DEBUG    | intelclaw.integrations.llm_provider:_get_github_token:705 - Using token from environment variable
+2026-02-05 21:02:59 | DEBUG    | intelclaw.integrations.llm_provider:_get_copilot_token:566 - Using cached Copilot token (expires: 1770308528.0)
+2026-02-05 21:02:59 | INFO     | intelclaw.integrations.llm_provider:initialize:505 - GitHub Copilot API initialized (base: https://api.individual.githubcopilot.com)
+2026-02-05 21:02:59 | INFO     | intelclaw.integrations.llm_provider:initialize:506 - Using Copilot model: gpt-4o
+2026-02-05 21:02:59 | INFO     | intelclaw.integrations.llm_provider:initialize:1298 - Using GitHub Copilot as LLM provider
+2026-02-05 21:02:59 | INFO     | intelclaw.agent.orchestrator:initialize:177 - Using LLM provider: github-copilot
+2026-02-05 21:02:59 | INFO     | intelclaw.agent.orchestrator:initialize:202 - TaskPlanner and TaskQueue initialized for autonomous workflows
+2026-02-05 21:02:59 | DEBUG    | intelclaw.agent.orchestrator:_build_graph:306 - LangGraph REACT workflow built
+2026-02-05 21:02:59 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Research Agent' initialized
+2026-02-05 21:02:59 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Coding Agent' initialized
+2026-02-05 21:02:59 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Task Agent' initialized
+2026-02-05 21:02:59 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'System Agent' initialized
+2026-02-05 21:02:59 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: research
+2026-02-05 21:02:59 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: coding
+2026-02-05 21:02:59 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: task
+2026-02-05 21:02:59 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: system
+2026-02-05 21:02:59 | INFO     | intelclaw.agent.orchestrator:_initialize_sub_agents:1172 - Initialized 4 sub-agents
+2026-02-05 21:02:59 | SUCCESS  | intelclaw.agent.orchestrator:initialize:212 - AgentOrchestrator initialized
+2026-02-05 21:02:59 | INFO     | intelclaw.core.app:startup:126 - Agent orchestrator initialized
+2026-02-05 21:02:59 | INFO     | intelclaw.agent.self_improvement:initialize:51 - Self-improvement module initialized
+2026-02-05 21:02:59 | INFO     | intelclaw.core.app:startup:131 - Self-improvement module initialized
+2026-02-05 21:02:59 | INFO     | intelclaw.core.app:startup:140 - Running in web mode - Qt UI disabled
+2026-02-05 21:02:59 | SUCCESS  | intelclaw.core.app:startup:143 - IntelCLaw started successfully!
+2026-02-05 21:02:59 | INFO     | intelclaw.web.server:_setup_routes:173 - Mounted static files from: M:\IntelCLaw\src\intelclaw\web\static
+2026-02-05 21:02:59 | INFO     | main:run_web_server:364 - Opening browser at http://127.0.0.1:8765
+2026-02-05 21:02:59 | INFO     | intelclaw.web.server:start:725 - 🦅 IntelCLaw Web Server starting on http://127.0.0.1:8765
+2026-02-05 21:02:59 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'agent.workflow'
+2026-02-05 21:02:59 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'agent.plan'
+2026-02-05 21:02:59 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'agent.plan.update'
+2026-02-05 21:02:59 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'tool.call'
+2026-02-05 21:02:59 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'tool.result'
+2026-02-05 21:02:59 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'agent.status'
+2026-02-05 21:03:00 | INFO     | intelclaw.web.server:connect:37 - WebSocket connected. Total connections: 1
+2026-02-05 21:03:00 | DEBUG    | intelclaw.web.server:models:258 - Using cached Copilot API token (expires: 1770308528.0)
+2026-02-05 21:03:00 | INFO     | intelclaw.web.server:websocket_endpoint:469 - New session: session_1770307379958
+2026-02-05 21:03:03 | DEBUG    | intelclaw.integrations.llm_provider:fetch_copilot_models:175 - Fetched 39 models from Copilot API
+2026-02-05 21:03:03 | INFO     | intelclaw.web.server:models:267 - Fetched 39 Copilot models dynamically
+2026-02-05 21:03:06 | INFO     | intelclaw.integrations.llm_provider:set_model:473 - Copilot model set to: claude-sonnet-4.5
+2026-02-05 21:03:06 | INFO     | intelclaw.integrations.llm_provider:set_model:1330 - LLMProvider: Model changed to claude-sonnet-4.5
+2026-02-05 21:03:06 | INFO     | intelclaw.web.server:set_model:327 - Model updated via agent._llm_provider: claude-sonnet-4.5
+2026-02-05 21:03:06 | INFO     | intelclaw.agent.orchestrator:clear_conversation_history:260 - Conversation history cleared
+2026-02-05 21:03:06 | INFO     | intelclaw.web.server:set_model:347 - Model switched: gpt-4o -> claude-sonnet-4.5 (provider: github-copilot, updated: True)
+2026-02-05 21:03:12 | DEBUG    | intelclaw.memory.agentic_rag:_semantic_retrieve:760 - Semantic search unavailable: The onnxruntime python package is not installed. Please install it with `pip install onnxruntime` in query.
+2026-02-05 21:03:14 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:03:14 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 0 tools available
+2026-02-05 21:03:19 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1004 - Loaded persona file: AGENT.md (2113 chars)
+2026-02-05 21:03:19 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1004 - Loaded persona file: SOUL.md (3755 chars)
+2026-02-05 21:03:19 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1004 - Loaded persona file: SKILLS.md (2713 chars)
+2026-02-05 21:03:19 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1004 - Loaded persona file: TOOLS.md (2791 chars)
+2026-02-05 21:03:19 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1004 - Loaded persona file: USER.md (3108 chars)
+2026-02-05 21:03:19 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:03:19 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:03:25 | DEBUG    | intelclaw.agent.orchestrator:_should_continue:909 - REACT iteration: 1
+2026-02-05 21:04:52 | INFO     | intelclaw.agent.orchestrator:process:1211 - Complex task detected - using TaskPlanner for structured execution
+2026-02-05 21:04:52 | INFO     | intelclaw.agent.orchestrator:_process_with_task_planner:1238 - Processing complex task with TaskPlanner: search the web for openclaw project and tell me about it and save the instructions to run this proje...
+2026-02-05 21:04:55 | DEBUG    | intelclaw.memory.agentic_rag:_semantic_retrieve:760 - Semantic search unavailable: The onnxruntime python package is not installed. Please install it with `pip install onnxruntime` in query.
+2026-02-05 21:05:01 | INFO     | intelclaw.agent.task_planner:create_plan:345 - Creating plan 2e0ea06c for: search the web for openclaw project and tell me about it and save the instructions to run this proje...
+2026-02-05 21:05:01 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:05:01 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:05:09 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:05:09 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:05:21 | INFO     | intelclaw.agent.task_planner:create_plan:380 - Created plan 2e0ea06c with 6 steps
+2026-02-05 21:05:21 | INFO     | intelclaw.agent.orchestrator:_async_on_plan_created:375 - Plan created with 6 steps: ['Search for OpenClaw project information', 'Search for OpenClaw installation instructions', 'Search for OpenClaw GitHub repository', 'Get current working directory', 'Compile OpenClaw information', 'Create installation instructions document']
+2026-02-05 21:05:21 | INFO     | intelclaw.agent.task_planner:_execute_step:689 - Executing tool tavily_search for step: Search for OpenClaw project information
+2026-02-05 21:05:22 | INFO     | intelclaw.agent.task_planner:_execute_step:711 - Step completed: Search for OpenClaw project information - [{'title': 'The AI Assistant That Runs 100% Locally (68K+ GitHub Stars)', 'url': 'https://www.youtub
+2026-02-05 21:05:22 | INFO     | intelclaw.agent.task_planner:_execute_step:689 - Executing tool tavily_search for step: Search for OpenClaw installation instructions
+2026-02-05 21:05:23 | INFO     | intelclaw.agent.task_planner:_execute_step:711 - Step completed: Search for OpenClaw installation instructions - [{'title': "OpenClaw Setup Guide — Don't Launch Your Bot Before Reading ...", 'url': 'https://habr.c
+2026-02-05 21:05:23 | INFO     | intelclaw.agent.task_planner:_execute_step:689 - Executing tool tavily_search for step: Search for OpenClaw GitHub repository
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.task_planner:_execute_step:711 - Step completed: Search for OpenClaw GitHub repository - [{'title': 'openclaw repositories - GitHub', 'url': 'https://github.com/orgs/openclaw/repositories',
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.task_planner:_execute_step:689 - Executing tool get_cwd for step: Get current working directory
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.task_planner:_execute_step:711 - Step completed: Get current working directory - M:\IntelCLaw
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.orchestrator:_async_on_step_started:405 - Executing step 1/6: Search for OpenClaw project information
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.orchestrator:_async_on_step_completed:436 - Step ✓ Search for OpenClaw project information: [{'title': 'The AI Assistant That Runs 100% Locally (68K+ GitHub Stars)', 'url': 'https://www.youtub
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.orchestrator:_async_on_step_started:405 - Executing step 2/6: Search for OpenClaw installation instructions
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.orchestrator:_async_on_step_completed:436 - Step ✓ Search for OpenClaw installation instructions: [{'title': "OpenClaw Setup Guide — Don't Launch Your Bot Before Reading ...", 'url': 'https://habr.c
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.orchestrator:_async_on_step_started:405 - Executing step 3/6: Search for OpenClaw GitHub repository
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.orchestrator:_async_on_step_completed:436 - Step ✓ Search for OpenClaw GitHub repository: [{'title': 'openclaw repositories - GitHub', 'url': 'https://github.com/orgs/openclaw/repositories',
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.orchestrator:_async_on_step_started:405 - Executing step 4/6: Get current working directory
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.orchestrator:_async_on_step_completed:436 - Step ✓ Get current working directory: M:\IntelCLaw
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.task_planner:_execute_step:706 - Using LLM to execute step: Compile OpenClaw information
+2026-02-05 21:05:24 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:05:24 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:05:24 | INFO     | intelclaw.agent.orchestrator:_async_on_step_started:405 - Executing step 5/6: Compile OpenClaw information
+2026-02-05 21:05:37 | INFO     | intelclaw.agent.task_planner:_execute_step:711 - Step completed: Compile OpenClaw information - I'll analyze and synthesize the information gathered about OpenClaw from the previous search steps.
+
+2026-02-05 21:05:37 | INFO     | intelclaw.agent.task_planner:_execute_step:689 - Executing tool file_write for step: Create installation instructions document
+2026-02-05 21:05:37 | INFO     | intelclaw.agent.task_planner:_execute_step:697 - File write content is placeholder, synthesizing from completed steps...
+2026-02-05 21:05:37 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:05:37 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:05:37 | INFO     | intelclaw.agent.orchestrator:_async_on_step_completed:436 - Step ✓ Compile OpenClaw information: I'll analyze and synthesize the information gathered about OpenClaw from the previous search steps.
+
+2026-02-05 21:05:37 | INFO     | intelclaw.agent.orchestrator:_async_on_step_started:405 - Executing step 6/6: Create installation instructions document
+2026-02-05 21:06:49 | INFO     | intelclaw.agent.task_planner:_execute_step:711 - Step completed: Create installation instructions document - True
+2026-02-05 21:06:49 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:06:49 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:06:49 | INFO     | intelclaw.agent.orchestrator:_async_on_step_completed:436 - Step ✓ Create installation instructions document: True
+2026-02-05 21:06:49 | INFO     | intelclaw.agent.orchestrator:_async_on_plan_completed:457 - Plan 2e0ea06c completed: completed
+2026-02-05 21:10:17 | DEBUG    | intelclaw.memory.agentic_rag:_semantic_retrieve:760 - Semantic search unavailable: The onnxruntime python package is not installed. Please install it with `pip install onnxruntime` in query.
+2026-02-05 21:10:22 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:10:22 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:10:30 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1004 - Loaded persona file: AGENT.md (2113 chars)
+2026-02-05 21:10:30 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1004 - Loaded persona file: SOUL.md (3755 chars)
+2026-02-05 21:10:30 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1004 - Loaded persona file: SKILLS.md (2713 chars)
+2026-02-05 21:10:30 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1004 - Loaded persona file: TOOLS.md (2791 chars)
+2026-02-05 21:10:30 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1004 - Loaded persona file: USER.md (3108 chars)
+2026-02-05 21:10:30 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:10:30 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:10:41 | DEBUG    | intelclaw.agent.orchestrator:_should_continue:909 - REACT iteration: 1
+2026-02-05 21:13:46 | INFO     | intelclaw.web.server:disconnect:42 - WebSocket disconnected. Total connections: 0
+2026-02-05 21:13:55 | INFO     | main:run_web_server:342 - ==================================================
+2026-02-05 21:13:55 | INFO     | main:run_web_server:343 - IntelCLaw - Web Interface
+2026-02-05 21:13:55 | INFO     | main:run_web_server:344 - ==================================================
+2026-02-05 21:13:55 | INFO     | intelclaw.core.app:__init__:75 - IntelCLaw application instance created
+2026-02-05 21:13:55 | INFO     | intelclaw.core.app:startup:79 - Starting IntelCLaw...
+2026-02-05 21:13:55 | INFO     | intelclaw.config.manager:load:143 - Configuration loaded from config.yaml
+2026-02-05 21:13:55 | DEBUG    | intelclaw.config.manager:_apply_env_overrides:246 - Applied env override: INTELCLAW_DEBUG
+2026-02-05 21:13:55 | DEBUG    | intelclaw.config.manager:_apply_env_overrides:246 - Applied env override: TAVILY_API_KEY
+2026-02-05 21:13:55 | DEBUG    | intelclaw.config.manager:_apply_env_overrides:246 - Applied env override: GITHUB_TOKEN
+2026-02-05 21:13:55 | INFO     | intelclaw.core.app:startup:84 - Configuration loaded
+2026-02-05 21:13:55 | INFO     | intelclaw.security.manager:initialize:55 - Initializing security manager...
+2026-02-05 21:13:55 | INFO     | intelclaw.security.manager:initialize:67 - Security manager initialized
+2026-02-05 21:13:55 | INFO     | intelclaw.core.app:startup:89 - Security manager initialized
+2026-02-05 21:13:55 | DEBUG    | intelclaw.memory.manager:__init__:72 - MemoryManager created
+2026-02-05 21:13:55 | INFO     | intelclaw.memory.manager:initialize:76 - Initializing memory system...
+2026-02-05 21:13:55 | INFO     | intelclaw.memory.working_memory:initialize:58 - Working memory initialized at data\working_memory.db
+2026-02-05 21:13:56 | WARNING  | intelclaw.memory.long_term:initialize:91 - Mem0 initialization failed: The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable, using fallback
+2026-02-05 21:13:56 | INFO     | intelclaw.memory.vector_store:initialize:78 - Vector store initialized: intelclaw
+2026-02-05 21:13:56 | DEBUG    | intelclaw.memory.agentic_rag:__init__:252 - AgenticRAG created
+2026-02-05 21:13:56 | INFO     | intelclaw.memory.agentic_rag:initialize:256 - Initializing Agentic RAG system...
+2026-02-05 21:13:56 | INFO     | intelclaw.memory.agentic_rag:_load_trees:849 - Loaded 5 document trees
+2026-02-05 21:13:59 | SUCCESS  | intelclaw.memory.agentic_rag:initialize:272 - Mem0 Platform API initialized (cloud memory enabled)
+2026-02-05 21:13:59 | INFO     | intelclaw.memory.agentic_rag:initialize:322 - ChromaDB vector store initialized
+2026-02-05 21:13:59 | SUCCESS  | intelclaw.memory.agentic_rag:initialize:328 - Agentic RAG system initialized
+2026-02-05 21:13:59 | INFO     | intelclaw.memory.agentic_rag:index_persona:585 - Indexing persona from: M:\IntelCLaw\persona
+2026-02-05 21:13:59 | INFO     | intelclaw.memory.agentic_rag:index_document:509 - Indexing document: AGENT.md
+2026-02-05 21:14:00 | DEBUG    | intelclaw.memory.agentic_rag:index_persona:605 - Indexed persona file: AGENT.md
+2026-02-05 21:14:00 | INFO     | intelclaw.memory.agentic_rag:index_document:509 - Indexing document: SOUL.md
+2026-02-05 21:14:00 | DEBUG    | intelclaw.memory.agentic_rag:index_persona:605 - Indexed persona file: SOUL.md
+2026-02-05 21:14:00 | INFO     | intelclaw.memory.agentic_rag:index_document:509 - Indexing document: SKILLS.md
+2026-02-05 21:14:01 | DEBUG    | intelclaw.memory.agentic_rag:index_persona:605 - Indexed persona file: SKILLS.md
+2026-02-05 21:14:01 | INFO     | intelclaw.memory.agentic_rag:index_document:509 - Indexing document: TOOLS.md
+2026-02-05 21:14:03 | DEBUG    | intelclaw.memory.agentic_rag:index_persona:605 - Indexed persona file: TOOLS.md
+2026-02-05 21:14:03 | INFO     | intelclaw.memory.agentic_rag:index_document:509 - Indexing document: USER.md
+2026-02-05 21:14:03 | DEBUG    | intelclaw.memory.agentic_rag:index_persona:605 - Indexed persona file: USER.md
+2026-02-05 21:14:03 | SUCCESS  | intelclaw.memory.manager:initialize:120 - Memory system initialized
+2026-02-05 21:14:03 | INFO     | intelclaw.core.app:startup:94 - Memory system initialized
+2026-02-05 21:14:03 | INFO     | intelclaw.memory.data_store:initialize:150 - DataStore initialized
+2026-02-05 21:14:03 | INFO     | intelclaw.core.app:startup:99 - Data store initialized
+2026-02-05 21:14:03 | DEBUG    | intelclaw.perception.manager:__init__:91 - PerceptionManager created
+2026-02-05 21:14:03 | INFO     | intelclaw.perception.manager:initialize:95 - Initializing perception layer...
+2026-02-05 21:14:03 | INFO     | intelclaw.perception.screen_capture:initialize:62 - Screen capture initialized with 1 monitors
+2026-02-05 21:14:03 | WARNING  | intelclaw.perception.ocr:initialize:55 - Tesseract not found: tesseract is not installed or it's not in your PATH. See README file for more information.. Install from https://github.com/tesseract-ocr/tesseract
+2026-02-05 21:14:03 | WARNING  | intelclaw.perception.ui_automation:initialize:50 - UI Automation not available (win32 not installed)
+2026-02-05 21:14:03 | INFO     | intelclaw.perception.activity_monitor:initialize:92 - Initializing activity monitor...
+2026-02-05 21:14:04 | DEBUG    | intelclaw.perception.activity_monitor:initialize:99 - Keyboard activity tracking enabled
+2026-02-05 21:14:04 | INFO     | intelclaw.perception.activity_monitor:initialize:104 - Activity monitor initialized
+2026-02-05 21:14:04 | SUCCESS  | intelclaw.perception.manager:initialize:130 - Perception layer initialized
+2026-02-05 21:14:04 | INFO     | intelclaw.core.app:startup:104 - Perception layer initialized
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:__init__:53 - ToolRegistry created
+2026-02-05 21:14:04 | INFO     | intelclaw.tools.registry:initialize:57 - Initializing tool registry...
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: tavily_search
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_read
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_write
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_delete
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_copy
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_move
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: file_search
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: list_directory
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: get_cwd
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: screenshot
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: clipboard
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: launch_app
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: system_info
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: web_scrape
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: shell_command
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: execute_code
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: pip_install
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:register:83 - Registered tool: powershell
+2026-02-05 21:14:04 | DEBUG    | intelclaw.tools.registry:_load_mcp_tools:301 - MCP tool loading not yet implemented
+2026-02-05 21:14:04 | SUCCESS  | intelclaw.tools.registry:initialize:68 - Tool registry initialized with 18 tools
+2026-02-05 21:14:04 | INFO     | intelclaw.core.app:startup:109 - Tool registry initialized
+2026-02-05 21:14:04 | INFO     | intelclaw.integrations.copilot:initialize:84 - Copilot integration initialized (model: gpt-4o)
+2026-02-05 21:14:04 | INFO     | intelclaw.integrations.copilot:initialize:276 - Model manager initialized: {'primary': 'gpt-4o', 'fallback': 'gpt-4o-mini', 'coding': 'gpt-4o'}
+2026-02-05 21:14:04 | INFO     | intelclaw.core.app:startup:116 - Copilot integration initialized
+2026-02-05 21:14:04 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'IntelCLaw Orchestrator' initialized
+2026-02-05 21:14:04 | INFO     | intelclaw.agent.orchestrator:__init__:159 - AgentOrchestrator created
+2026-02-05 21:14:04 | INFO     | intelclaw.agent.orchestrator:initialize:163 - Initializing AgentOrchestrator...
+2026-02-05 21:14:04 | DEBUG    | intelclaw.integrations.llm_provider:_get_github_token:705 - Using token from environment variable
+2026-02-05 21:14:04 | DEBUG    | intelclaw.integrations.llm_provider:_get_copilot_token:566 - Using cached Copilot token (expires: 1770308528.0)
+2026-02-05 21:14:04 | INFO     | intelclaw.integrations.llm_provider:initialize:505 - GitHub Copilot API initialized (base: https://api.individual.githubcopilot.com)
+2026-02-05 21:14:04 | INFO     | intelclaw.integrations.llm_provider:initialize:506 - Using Copilot model: gpt-4o
+2026-02-05 21:14:04 | INFO     | intelclaw.integrations.llm_provider:initialize:1298 - Using GitHub Copilot as LLM provider
+2026-02-05 21:14:04 | INFO     | intelclaw.agent.orchestrator:initialize:177 - Using LLM provider: github-copilot
+2026-02-05 21:14:04 | INFO     | intelclaw.agent.orchestrator:initialize:202 - TaskPlanner and TaskQueue initialized for autonomous workflows
+2026-02-05 21:14:04 | DEBUG    | intelclaw.agent.orchestrator:_build_graph:306 - LangGraph REACT workflow built
+2026-02-05 21:14:04 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Research Agent' initialized
+2026-02-05 21:14:04 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Coding Agent' initialized
+2026-02-05 21:14:04 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'Task Agent' initialized
+2026-02-05 21:14:04 | DEBUG    | intelclaw.agent.base:__init__:101 - Agent 'System Agent' initialized
+2026-02-05 21:14:04 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: research
+2026-02-05 21:14:04 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: coding
+2026-02-05 21:14:04 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: task
+2026-02-05 21:14:04 | DEBUG    | intelclaw.agent.router:register_agent:62 - Registered agent: system
+2026-02-05 21:14:04 | INFO     | intelclaw.agent.orchestrator:_initialize_sub_agents:1173 - Initialized 4 sub-agents
+2026-02-05 21:14:04 | SUCCESS  | intelclaw.agent.orchestrator:initialize:212 - AgentOrchestrator initialized
+2026-02-05 21:14:04 | INFO     | intelclaw.core.app:startup:126 - Agent orchestrator initialized
+2026-02-05 21:14:04 | INFO     | intelclaw.agent.self_improvement:initialize:51 - Self-improvement module initialized
+2026-02-05 21:14:04 | INFO     | intelclaw.core.app:startup:131 - Self-improvement module initialized
+2026-02-05 21:14:04 | INFO     | intelclaw.core.app:startup:140 - Running in web mode - Qt UI disabled
+2026-02-05 21:14:04 | SUCCESS  | intelclaw.core.app:startup:143 - IntelCLaw started successfully!
+2026-02-05 21:14:04 | INFO     | intelclaw.web.server:_setup_routes:173 - Mounted static files from: M:\IntelCLaw\src\intelclaw\web\static
+2026-02-05 21:14:04 | INFO     | main:run_web_server:364 - Opening browser at http://127.0.0.1:8765
+2026-02-05 21:14:04 | INFO     | intelclaw.web.server:start:725 - 🦅 IntelCLaw Web Server starting on http://127.0.0.1:8765
+2026-02-05 21:14:04 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'agent.workflow'
+2026-02-05 21:14:04 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'agent.plan'
+2026-02-05 21:14:04 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'agent.plan.update'
+2026-02-05 21:14:04 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'tool.call'
+2026-02-05 21:14:04 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'tool.result'
+2026-02-05 21:14:04 | DEBUG    | intelclaw.core.events:subscribe:83 - Handler subscribed to 'agent.status'
+2026-02-05 21:14:04 | DEBUG    | intelclaw.web.server:models:258 - Using cached Copilot API token (expires: 1770308528.0)
+2026-02-05 21:14:05 | INFO     | intelclaw.web.server:connect:37 - WebSocket connected. Total connections: 1
+2026-02-05 21:14:05 | INFO     | intelclaw.web.server:websocket_endpoint:469 - New session: session_1770308044955
+2026-02-05 21:14:06 | DEBUG    | intelclaw.integrations.llm_provider:fetch_copilot_models:175 - Fetched 39 models from Copilot API
+2026-02-05 21:14:06 | INFO     | intelclaw.web.server:models:267 - Fetched 39 Copilot models dynamically
+2026-02-05 21:14:10 | INFO     | intelclaw.integrations.llm_provider:set_model:473 - Copilot model set to: claude-sonnet-4.5
+2026-02-05 21:14:10 | INFO     | intelclaw.integrations.llm_provider:set_model:1330 - LLMProvider: Model changed to claude-sonnet-4.5
+2026-02-05 21:14:10 | INFO     | intelclaw.web.server:set_model:327 - Model updated via agent._llm_provider: claude-sonnet-4.5
+2026-02-05 21:14:10 | INFO     | intelclaw.agent.orchestrator:clear_conversation_history:260 - Conversation history cleared
+2026-02-05 21:14:10 | INFO     | intelclaw.web.server:set_model:347 - Model switched: gpt-4o -> claude-sonnet-4.5 (provider: github-copilot, updated: True)
+2026-02-05 21:14:16 | DEBUG    | intelclaw.memory.agentic_rag:_semantic_retrieve:760 - Semantic search unavailable: The onnxruntime python package is not installed. Please install it with `pip install onnxruntime` in query.
+2026-02-05 21:14:18 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:14:18 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 0 tools available
+2026-02-05 21:14:22 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1005 - Loaded persona file: AGENT.md (2113 chars)
+2026-02-05 21:14:22 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1005 - Loaded persona file: SOUL.md (3755 chars)
+2026-02-05 21:14:22 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1005 - Loaded persona file: SKILLS.md (2713 chars)
+2026-02-05 21:14:22 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1005 - Loaded persona file: TOOLS.md (2791 chars)
+2026-02-05 21:14:22 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1005 - Loaded persona file: USER.md (3108 chars)
+2026-02-05 21:14:22 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:14:22 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:14:26 | DEBUG    | intelclaw.agent.orchestrator:_should_continue:910 - REACT iteration: 1
+2026-02-05 21:14:58 | DEBUG    | intelclaw.memory.agentic_rag:_semantic_retrieve:760 - Semantic search unavailable: The onnxruntime python package is not installed. Please install it with `pip install onnxruntime` in query.
+2026-02-05 21:15:05 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:15:05 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:15:11 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1005 - Loaded persona file: AGENT.md (2113 chars)
+2026-02-05 21:15:11 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1005 - Loaded persona file: SOUL.md (3755 chars)
+2026-02-05 21:15:11 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1005 - Loaded persona file: SKILLS.md (2713 chars)
+2026-02-05 21:15:11 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1005 - Loaded persona file: TOOLS.md (2791 chars)
+2026-02-05 21:15:11 | DEBUG    | intelclaw.agent.orchestrator:_load_persona_files:1005 - Loaded persona file: USER.md (3108 chars)
+2026-02-05 21:15:11 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1010 - Calling Copilot API (https://api.individual.githubcopilot.com) with model: claude-sonnet-4.5
+2026-02-05 21:15:11 | DEBUG    | intelclaw.integrations.llm_provider:_call_copilot_api:1012 - With 18 tools available
+2026-02-05 21:15:18 | DEBUG    | intelclaw.agent.orchestrator:_should_continue:910 - REACT iteration: 1
