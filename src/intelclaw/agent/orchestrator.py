@@ -13,6 +13,7 @@ This is the root agent that:
 import asyncio
 import json
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -478,6 +479,9 @@ class AgentOrchestrator(BaseAgent):
     def _should_plan(self, user_message: str) -> bool:
         """Heuristic: determine if the task benefits from a multi-step plan."""
         msg = (user_message or "").lower()
+
+        if self._requires_tool_use(user_message):
+            return True
         
         # Explicit multi-step signals
         indicators = [
@@ -496,6 +500,40 @@ class AgentOrchestrator(BaseAgent):
         
         # Longer requests usually benefit from planning
         return len(msg) > 200
+
+    def _requires_tool_use(self, user_message: str) -> bool:
+        """
+        Heuristic: detect if the request explicitly requires tool execution.
+        
+        This helps route action-oriented tasks through TaskPlanner so tools
+        are actually executed (even when models don't emit tool_calls).
+        """
+        msg = (user_message or "").lower()
+        if not msg:
+            return False
+        
+        action_phrases = [
+            "search the web", "search web", "web search", "look up", "browse the web",
+            "save to", "write to", "write a file", "create a file", "create file",
+            "save in", "save as", "export to",
+            "delete file", "remove file", "move file", "copy file", "rename file",
+            "list files", "list directory", "open file", "read file",
+            "run command", "execute command", "shell command", "powershell",
+            "download", "install", "scrape", "fetch url", "collect urls",
+        ]
+        if any(phrase in msg for phrase in action_phrases):
+            return True
+        
+        # File extension or explicit path hints indicate file operations
+        if re.search(r"\b\w+\.(txt|md|csv|json|yaml|yml|log|py|js|ts|html|css)\b", msg):
+            return True
+        
+        # Current directory + action verb implies file output
+        if "current directory" in msg or "this directory" in msg or "this folder" in msg:
+            if any(word in msg for word in ["save", "write", "create", "output", "export"]):
+                return True
+        
+        return False
     
     def _is_complex_task(self, user_message: str) -> bool:
         """
@@ -505,6 +543,10 @@ class AgentOrchestrator(BaseAgent):
         and progress tracking via the TaskPlanner.
         """
         msg = (user_message or "").lower()
+
+        # If tools are explicitly required, treat as complex for reliable execution
+        if self._requires_tool_use(user_message):
+            return True
         
         # Strong indicators of complex multi-step tasks
         complex_indicators = [
@@ -788,7 +830,7 @@ class AgentOrchestrator(BaseAgent):
                 "id": tool_call_id,
                 "name": tool_name,
                 "success": not result_text.lower().startswith("error"),
-                "result": result_text[:1000],
+                "result": result_text,
             })
             
             tool_results.append(
@@ -1191,7 +1233,19 @@ Focus only on the current plan step unless the user changes the goal.
         # =========================================================================
         # SIMPLE TASK HANDLING: Use standard REACT workflow
         # =========================================================================
-        return await self._process_with_react(context, start_time)
+        react_response = await self._process_with_react(context, start_time)
+        
+        # If the request clearly requires tools but none were used, fall back to TaskPlanner
+        if (
+            self._task_planner
+            and self._planning_enabled
+            and self._requires_tool_use(context.user_message)
+            and not react_response.tools_used
+        ):
+            logger.info("No tools were used for a tool-required request; falling back to TaskPlanner execution.")
+            return await self._process_with_task_planner(context, start_time)
+        
+        return react_response
     
     async def _process_with_task_planner(
         self, context: AgentContext, start_time: float
