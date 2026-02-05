@@ -1625,6 +1625,8 @@ Focus only on the current plan step unless the user changes the goal.
         For complex multi-step tasks, uses TaskPlanner for structured planning
         and step-by-step execution with progress tracking.
         
+        For simple system queries, tries direct tool execution first for speed.
+        
         Args:
             context: Full context for the request
             
