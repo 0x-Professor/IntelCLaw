@@ -230,7 +230,7 @@ class TaskPlanner:
     """
     
     # Planning prompts
-    PLANNING_SYSTEM_PROMPT = """You are an expert task planner for an autonomous AI agent.
+    PLANNING_SYSTEM_PROMPT = """You are an expert task planner for an autonomous Windows AI agent.
 Your job is to break down user requests into clear, actionable steps.
 
 For each step, determine:
@@ -243,20 +243,98 @@ AVAILABLE TOOLS (use these EXACT names):
 {tools}
 
 IMPORTANT TOOL MAPPING:
-- For web search: use "tavily_search" with args {{"query": "search terms"}}
+
+### File Operations
 - For reading files: use "file_read" with args {{"path": "file/path"}}
 - For writing files: use "file_write" with args {{"path": "file/path", "content": "..."}}
 - For deleting files: use "file_delete" with args {{"path": "file/path"}}
-- For copying files: use "file_copy" with args {{"source": "src/path", "destination": "dst/path"}}
-- For moving/renaming files: use "file_move" with args {{"source": "old/path", "destination": "new/path"}}
+- For copying files: use "file_copy" with args {{"source": "src", "destination": "dst"}}
+- For moving/renaming: use "file_move" with args {{"source": "old", "destination": "new"}}
 - For finding files: use "file_search" with args {{"directory": ".", "pattern": "*.txt"}}
 - For listing directories: use "list_directory" with args {{"path": "."}}
 - For current directory: use "get_cwd"
-- For running commands: use "shell_command" with args {{"command": "..."}}
-- For PowerShell: use "powershell" with args {{"command": "..."}}
+
+### Search & Web
+- For web search: use "tavily_search" with args {{"query": "search terms"}}
 - For web scraping: use "web_scrape" with args {{"url": "..."}}
+
+### Shell & Code
+- For running commands: use "shell_command" with args {{"command": "..."}}
+- For PowerShell: use "powershell" with args {{"script": "..."}}
+
+### Process & Task Management (Windows)
+- For listing processes/tasks: use "process_management" with args {{"action": "list"}}
+- For finding a process: use "process_management" with args {{"action": "find", "name": "process_name"}}
+- For process details: use "process_management" with args {{"action": "details", "pid": 1234}}
+- For killing a process: use "process_management" with args {{"action": "kill", "pid": 1234}}
+- For top CPU consumers: use "process_management" with args {{"action": "top_cpu"}}
+- For top memory consumers: use "process_management" with args {{"action": "top_memory"}}
+
+### Windows Services
+- For listing services: use "windows_services" with args {{"action": "list"}}
+- For service details: use "windows_services" with args {{"action": "get", "name": "service_name"}}
+- For start/stop/restart: use "windows_services" with args {{"action": "start", "name": "service_name"}}
+
+### Scheduled Tasks
+- For listing tasks: use "windows_tasks" with args {{"action": "list"}}
+- For creating tasks: use "windows_tasks" with args {{"action": "create", "name": "...", "action_path": "...", "schedule": "daily", "start_time": "09:00"}}
+
+### Registry
+- For reading registry: use "windows_registry" with args {{"action": "get", "path": "HKLM:\\\\...", "name": "value"}}
+- For listing keys: use "windows_registry" with args {{"action": "list_keys", "path": "HKLM:\\\\..."}}
+
+### Event Logs
+- For querying events: use "windows_eventlog" with args {{"action": "query", "log_name": "System"}}
+- For listing log names: use "windows_eventlog" with args {{"action": "list_logs"}}
+
+### Network
+- For network adapters: use "network_info" with args {{"action": "adapters"}}
+- For active connections: use "network_info" with args {{"action": "connections"}}
+- For listening ports: use "network_info" with args {{"action": "listening"}}
+- For ping: use "network_info" with args {{"action": "ping", "target": "host"}}
+- For public IP: use "network_info" with args {{"action": "public_ip"}}
+
+### Disk & Storage
+- For disk space: use "disk_management" with args {{"action": "space"}}
+- For volumes: use "disk_management" with args {{"action": "volumes"}}
+- For large files: use "disk_management" with args {{"action": "large_files", "path": "C:\\\\"}}
+
+### System Performance
+- For system overview: use "system_performance" with args {{"action": "overview"}}
+- For CPU info: use "system_performance" with args {{"action": "cpu"}}
+- For memory info: use "system_performance" with args {{"action": "memory"}}
+- For GPU info: use "system_performance" with args {{"action": "gpu"}}
+- For hardware: use "system_performance" with args {{"action": "hardware"}}
+- For battery: use "system_performance" with args {{"action": "battery"}}
+- For uptime: use "system_performance" with args {{"action": "uptime"}}
+
+### Firewall
+- For firewall status: use "windows_firewall" with args {{"action": "status"}}
+- For listing rules: use "windows_firewall" with args {{"action": "list_rules"}}
+
+### Installed Applications
+- For listing apps: use "installed_apps" with args {{"action": "list"}}
+- For searching apps: use "installed_apps" with args {{"action": "search", "name": "chrome"}}
+- For startup apps: use "installed_apps" with args {{"action": "startup_apps"}}
+
+### Environment Variables
+- For listing vars: use "environment_vars" with args {{"action": "list"}}
+- For PATH: use "environment_vars" with args {{"action": "path"}}
+
+### Windows Updates
+- For pending updates: use "windows_update" with args {{"action": "pending"}}
+- For installed updates: use "windows_update" with args {{"action": "installed"}}
+
+### Users & Security
+- For current user: use "user_security" with args {{"action": "current_user"}}
+- For local users: use "user_security" with args {{"action": "list_users"}}
+
+### WMI/CIM
+- For CIM queries: use "windows_cim" with args {{"class_name": "Win32_OperatingSystem"}}
+
+### Other
 - For taking screenshot: use "screenshot"
-- For clipboard: use "clipboard" with args {{"action": "read"}} or {{"action": "write", "content": "..."}}
+- For clipboard: use "clipboard" with args {{"action": "read"}}
 - For launching apps: use "launch_app" with args {{"target": "app_name"}}
 - For system info: use "system_info"
 
@@ -267,6 +345,8 @@ Guidelines:
 - Include verification/validation steps for important operations
 - Maximum {max_steps} steps per plan
 - For analysis/synthesis steps without a specific tool, set tool to null
+- When user asks about "running tasks" or "processes", use "process_management" tool
+- Always prefer specific Windows tools over generic shell_command/powershell
 
 Return ONLY a JSON array with this structure:
 [
