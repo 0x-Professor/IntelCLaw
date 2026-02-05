@@ -238,12 +238,36 @@ class IntelCLawApp:
             return "Agent not initialized"
         
         # Get current context from perception
-        context = await self.perception.get_context() if self.perception else {}
+        perception_context = await self.perception.get_context() if self.perception else {}
+        
+        # Build AgentContext (required by orchestrator)
+        from intelclaw.agent.base import AgentContext
+        
+        screen_context = None
+        if perception_context:
+            screen_context = {
+                "text": perception_context.get("screen_text"),
+                "ui_elements": perception_context.get("ui_elements"),
+                "active_window_title": perception_context.get("active_window_title"),
+            }
+        
+        conversation_history = (
+            self.memory.get_conversation_history(limit=10) if self.memory else []
+        )
+        
+        agent_context = AgentContext(
+            user_message=message,
+            conversation_history=conversation_history,
+            screen_context=screen_context,
+            active_window=perception_context.get("active_window") if perception_context else None,
+            clipboard_content=perception_context.get("clipboard_content") if perception_context else None,
+            user_preferences={},
+        )
         
         # Process through agent
-        response = await self.agent.process(message, context)
+        response = await self.agent.process(agent_context)
         
-        return response
+        return response.answer if response else "I couldn't process that request."
     
     def toggle_overlay(self) -> None:
         """Toggle the overlay window visibility."""

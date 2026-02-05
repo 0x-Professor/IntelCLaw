@@ -798,45 +798,94 @@ class CopilotLLM:
             if not await self.initialize():
                 return AIMessage(content="Error: GitHub Copilot token expired. Please run 'uv run python -m intelclaw onboard' to re-authenticate.")
         
-        # Convert input to messages format
+        # Convert input to OpenAI-compatible messages format
+        from langchain_core.messages import AIMessage, SystemMessage, HumanMessage, ToolMessage
+        
+        def _normalize_tool_args(args):
+            if args is None:
+                return {}
+            if isinstance(args, str):
+                try:
+                    return json.loads(args)
+                except Exception:
+                    return {"input": args}
+            return args
+        
+        def _tool_call_to_openai(tool_call):
+            if isinstance(tool_call, dict):
+                name = tool_call.get("name")
+                args = tool_call.get("args", tool_call.get("arguments"))
+                call_id = tool_call.get("id")
+            else:
+                name = getattr(tool_call, "name", None)
+                args = getattr(tool_call, "args", None) or getattr(tool_call, "arguments", None)
+                call_id = getattr(tool_call, "id", None)
+            
+            if not call_id:
+                call_id = f"call_{time.time_ns()}"
+            
+            args = _normalize_tool_args(args)
+            args_json = args if isinstance(args, str) else json.dumps(args)
+            
+            return {
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": name or "",
+                    "arguments": args_json
+                }
+            }
+        
+        def _msg_to_openai(msg):
+            if isinstance(msg, dict):
+                return msg
+            
+            if isinstance(msg, SystemMessage):
+                return {"role": "system", "content": msg.content}
+            
+            if isinstance(msg, HumanMessage):
+                return {"role": "user", "content": msg.content}
+            
+            if isinstance(msg, AIMessage):
+                payload = {"role": "assistant", "content": msg.content or ""}
+                
+                tool_calls = getattr(msg, "tool_calls", None)
+                if not tool_calls and hasattr(msg, "additional_kwargs"):
+                    tool_calls = msg.additional_kwargs.get("tool_calls")
+                
+                if tool_calls:
+                    payload["tool_calls"] = [_tool_call_to_openai(tc) for tc in tool_calls]
+                
+                return payload
+            
+            if isinstance(msg, ToolMessage):
+                tool_call_id = getattr(msg, "tool_call_id", None) or f"call_{time.time_ns()}"
+                payload = {
+                    "role": "tool",
+                    "content": msg.content or "",
+                    "tool_call_id": tool_call_id,
+                }
+                return payload
+            
+            if hasattr(msg, "content"):
+                return {"role": "user", "content": str(msg.content)}
+            
+            return {"role": "user", "content": str(msg)}
+        
         messages = []
         
-        # Check if input is LangChain messages (list of message objects)
         if isinstance(input_data, list):
             for msg in input_data:
-                if hasattr(msg, 'content'):
-                    # It's a LangChain message object
-                    role = "user"
-                    if msg.__class__.__name__ == "SystemMessage":
-                        role = "system"
-                    elif msg.__class__.__name__ == "AIMessage":
-                        role = "assistant"
-                    elif msg.__class__.__name__ == "HumanMessage":
-                        role = "user"
-                    messages.append({"role": role, "content": msg.content})
-                elif isinstance(msg, dict):
-                    messages.append(msg)
+                messages.append(_msg_to_openai(msg))
         elif isinstance(input_data, str):
             messages = [{"role": "user", "content": input_data}]
         else:
-            # Try to get content from object
-            if hasattr(input_data, 'content'):
-                messages = [{"role": "user", "content": input_data.content}]
-            else:
-                messages = [{"role": "user", "content": str(input_data)}]
+            messages.append(_msg_to_openai(input_data))
         
         # Add any additional messages from kwargs
         if "messages" in kwargs:
             for msg in kwargs["messages"]:
-                if isinstance(msg, dict):
-                    messages.append(msg)
-                elif hasattr(msg, 'content'):
-                    role = "user"
-                    if msg.__class__.__name__ == "SystemMessage":
-                        role = "system"
-                    elif msg.__class__.__name__ == "AIMessage":
-                        role = "assistant"
-                    messages.append({"role": role, "content": msg.content})
+                messages.append(_msg_to_openai(msg))
         
         try:
             # Use Copilot API exclusively

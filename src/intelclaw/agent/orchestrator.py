@@ -9,6 +9,7 @@ This is the root agent that:
 """
 
 import asyncio
+import json
 import os
 import time
 from datetime import datetime
@@ -307,8 +308,26 @@ class AgentOrchestrator(BaseAgent):
         tools_used = list(state["tools_used"])
         
         for tool_call in last_message.tool_calls:
-            tool_name = tool_call["name"]
-            tool_args = tool_call["args"]
+            if isinstance(tool_call, dict):
+                tool_name = tool_call.get("name")
+                tool_args = tool_call.get("args", tool_call.get("arguments"))
+                tool_call_id = tool_call.get("id")
+            else:
+                tool_name = getattr(tool_call, "name", None)
+                tool_args = getattr(tool_call, "args", None) or getattr(tool_call, "arguments", None)
+                tool_call_id = getattr(tool_call, "id", None)
+            
+            if isinstance(tool_args, str):
+                try:
+                    tool_args = json.loads(tool_args)
+                except Exception:
+                    tool_args = {"input": tool_args}
+            
+            if tool_args is None:
+                tool_args = {}
+            
+            if not tool_call_id:
+                tool_call_id = f"call_{time.time_ns()}"
             
             logger.debug(f"Executing tool: {tool_name}")
             tools_used.append(tool_name)
@@ -319,7 +338,7 @@ class AgentOrchestrator(BaseAgent):
             tool_results.append(
                 ToolMessage(
                     content=str(result),
-                    tool_call_id=tool_call["id"],
+                    tool_call_id=tool_call_id,
                     name=tool_name,
                 )
             )
