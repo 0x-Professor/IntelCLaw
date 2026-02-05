@@ -437,12 +437,131 @@ code, pre, .mono {
     overflow: hidden;
 }
 
-/* Workflow Panel */
+/* Workflow Bar (compact) */
+.workflow-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 12px 24px 0;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(20, 20, 24, 0.96) 0%, rgba(16, 16, 18, 0.96) 100%);
+    box-shadow: var(--shadow-sm);
+}
+
+.workflow-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+}
+
+.workflow-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
+    flex-shrink: 0;
+}
+
+.workflow-bar-now {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.workflow-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.workflow-mini-progress {
+    width: 90px;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.workflow-mini-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+    transition: width 0.3s ease;
+}
+
+.workflow-bar-status {
+    font-size: 10px;
+    padding: 4px 8px;
+    border-radius: 9999px;
+    background: var(--bg-tertiary);
+    color: var(--text-tertiary);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.workflow-toggle {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.workflow-bar .workflow-label {
+    min-width: auto;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.workflow-bar-status.status-thinking {
+    background: var(--warning-soft);
+    color: var(--warning);
+}
+
+.workflow-bar-status.status-executing {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.workflow-bar-status.status-waiting {
+    background: var(--warning-soft);
+    color: var(--warning);
+}
+
+.workflow-bar-status.status-completed,
+.workflow-bar-status.status-idle {
+    background: var(--success-soft);
+    color: var(--success);
+}
+
+.workflow-bar-status.status-error {
+    background: var(--error-soft);
+    color: var(--error);
+}
+
+.workflow-toggle:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+/* Workflow Panel (details) */
 .workflow-panel {
     background: linear-gradient(180deg, rgba(20, 20, 24, 0.98) 0%, rgba(16, 16, 18, 0.98) 100%);
     border: 1px solid var(--border);
     border-radius: 14px;
-    margin: 16px 24px 0;
+    margin: 10px 24px 0;
     padding: 14px 16px;
     box-shadow: var(--shadow-md);
     animation: slideDown 0.3s ease;
@@ -458,6 +577,27 @@ code, pre, .mono {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 12px;
+}
+
+.workflow-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.workflow-close {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-tertiary);
+    cursor: pointer;
+}
+
+.workflow-close:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
 }
 
 .workflow-phases {
@@ -799,6 +939,14 @@ code, pre, .mono {
 @media (max-width: 900px) {
     .workflow-panel {
         margin: 12px 16px 0;
+    }
+    .workflow-bar {
+        margin: 12px 16px 0;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .workflow-bar-right {
+        justify-content: space-between;
     }
     .workflow-body {
         grid-template-columns: 1fr;

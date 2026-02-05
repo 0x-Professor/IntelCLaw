@@ -11,6 +11,7 @@ class IntelCLawApp {
         this.settings = this._loadSettings();
         this.isTyping = false;
         this.currentStreamingMessage = null;
+        this.workflowExpanded = false;
 
         // WebSocket
         this.ws = new WebSocketManager();
@@ -153,6 +154,12 @@ class IntelCLawApp {
             workflowNext: document.getElementById('workflowNext'),
             workflowSteps: document.getElementById('workflowSteps'),
             workflowPhases: document.getElementById('workflowPhases'),
+            workflowBar: document.getElementById('workflowBar'),
+            workflowBarNow: document.getElementById('workflowBarNow'),
+            workflowBarStatus: document.getElementById('workflowBarStatus'),
+            workflowBarFill: document.getElementById('workflowBarFill'),
+            workflowToggle: document.getElementById('workflowToggle'),
+            workflowClose: document.getElementById('workflowClose'),
             
             // Input
             messageInput: document.getElementById('messageInput'),
@@ -229,6 +236,14 @@ class IntelCLawApp {
         this.elements.panelTabs.forEach(tab => {
             tab.addEventListener('click', () => this._handleTabSwitch(tab));
         });
+
+        // Workflow panel toggle
+        if (this.elements.workflowToggle) {
+            this.elements.workflowToggle.addEventListener('click', () => this._toggleWorkflowPanel());
+        }
+        if (this.elements.workflowClose) {
+            this.elements.workflowClose.addEventListener('click', () => this._toggleWorkflowPanel(false));
+        }
         
         // Toggles
         this.elements.streamingToggle.addEventListener('click', (e) => this._handleToggle(e.target, 'streaming'));
@@ -636,18 +651,59 @@ class IntelCLawApp {
         const computedProgress = plan.length > 0 ? (completed.size / plan.length) * 100 : 0;
         const progress = typeof workflow.progress === 'number' ? workflow.progress : computedProgress;
         const queue = workflow.queue || [];
+        const truncate = (text, max = 140) => {
+            if (!text) return '-';
+            if (text.length <= max) return text;
+            return text.slice(0, max).trim() + '…';
+        };
+        const statusRaw = workflow.status || 'idle';
+        const status = statusRaw.toLowerCase();
+        const statusUpper = statusRaw.toUpperCase();
+        const barPhaseLabel = status === 'thinking'
+            ? 'PLAN'
+            : status === 'executing'
+                ? 'ACT'
+                : status === 'completed' || status === 'idle'
+                    ? 'REVIEW'
+                    : statusUpper;
+        const statusFallback = status === 'thinking'
+            ? 'Planning'
+            : status === 'executing'
+                ? 'Executing'
+                : status === 'waiting'
+                    ? 'Waiting'
+                    : '-';
+
+        // Compact workflow bar
+        if (this.elements.workflowBar) {
+            if (plan.length > 0 || status !== 'idle') {
+                this.elements.workflowBar.classList.remove('hidden');
+            } else {
+                this.elements.workflowBar.classList.add('hidden');
+            }
+        }
+        if (this.elements.workflowBarNow) {
+            const barNow = workflow.current_step_title || plan[currentIndex] || statusFallback;
+            this.elements.workflowBarNow.textContent = truncate(barNow, 120);
+            this.elements.workflowBarNow.title = barNow;
+        }
+        if (this.elements.workflowBarStatus) {
+            this.elements.workflowBarStatus.textContent = barPhaseLabel;
+            this.elements.workflowBarStatus.className = 'workflow-bar-status status-' + status;
+            this.elements.workflowBarStatus.title = statusUpper;
+        }
+        if (this.elements.workflowBarFill) {
+            this.elements.workflowBarFill.style.width = `${progress}%`;
+        }
 
         // Status with color coding
         if (this.elements.workflowStatus) {
-            const status = workflow.status || 'IDLE';
-            const statusText = status.toUpperCase();
-            this.elements.workflowStatus.textContent = statusText;
-            this.elements.workflowStatus.className = 'workflow-status status-' + status.toLowerCase();
+            this.elements.workflowStatus.textContent = statusUpper;
+            this.elements.workflowStatus.className = 'workflow-status status-' + status;
         }
 
         // Phase chips (Plan → Act → Review)
         if (this.elements.workflowPhases) {
-            const status = (workflow.status || 'idle').toLowerCase();
             const phases = this.elements.workflowPhases.querySelectorAll('.phase');
             phases.forEach(phase => {
                 phase.classList.remove('active', 'done');
@@ -684,13 +740,8 @@ class IntelCLawApp {
         }
 
         // Current step (use current_step_title if available)
-        const nowStep = workflow.current_step_title || plan[currentIndex] || '-';
+        const nowStep = workflow.current_step_title || plan[currentIndex] || statusFallback;
         const nextStep = workflow.next_step || plan[currentIndex + 1] || '-';
-        const truncate = (text, max = 140) => {
-            if (!text) return '-';
-            if (text.length <= max) return text;
-            return text.slice(0, max).trim() + '…';
-        };
         
         if (this.elements.workflowNow) {
             this.elements.workflowNow.textContent = truncate(nowStep, 180);
@@ -779,9 +830,11 @@ class IntelCLawApp {
 
         // Show/hide panel based on activity
         if (this.elements.workflowPanel) {
-            const hasActivity = plan.length > 0 || workflow.status !== 'idle';
+            const hasActivity = plan.length > 0 || status !== 'idle';
             if (hasActivity) {
-                this.elements.workflowPanel.classList.remove('hidden');
+                if (this.workflowExpanded) {
+                    this.elements.workflowPanel.classList.remove('hidden');
+                }
             } else {
                 // Keep visible briefly after completion
                 setTimeout(() => {
@@ -789,6 +842,31 @@ class IntelCLawApp {
                         this.elements.workflowPanel.classList.add('hidden');
                     }
                 }, 3000);
+            }
+        }
+    }
+
+    /**
+     * Toggle workflow panel visibility
+     */
+    _toggleWorkflowPanel(show = null) {
+        if (!this.elements.workflowPanel) return;
+        if (show === null) {
+            this.workflowExpanded = !this.workflowExpanded;
+        } else {
+            this.workflowExpanded = show;
+        }
+        if (this.workflowExpanded) {
+            this.elements.workflowPanel.classList.remove('hidden');
+            if (this.elements.workflowToggle) {
+                this.elements.workflowToggle.textContent = 'Hide steps';
+                this.elements.workflowToggle.setAttribute('aria-expanded', 'true');
+            }
+        } else {
+            this.elements.workflowPanel.classList.add('hidden');
+            if (this.elements.workflowToggle) {
+                this.elements.workflowToggle.textContent = 'View steps';
+                this.elements.workflowToggle.setAttribute('aria-expanded', 'false');
             }
         }
     }

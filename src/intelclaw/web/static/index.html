@@ -124,7 +124,23 @@
             
             <!-- Chat Area -->
             <div class="chat-area" id="chatView">
-                <!-- Workflow Panel -->
+                <!-- Workflow Bar (compact) -->
+                <div class="workflow-bar hidden" id="workflowBar">
+                    <div class="workflow-bar-left">
+                        <span class="workflow-dot"></span>
+                        <span class="workflow-label">Workflow</span>
+                        <span class="workflow-bar-now" id="workflowBarNow">-</span>
+                    </div>
+                    <div class="workflow-bar-right">
+                        <div class="workflow-mini-progress">
+                            <div class="workflow-mini-fill" id="workflowBarFill" style="width: 0%"></div>
+                        </div>
+                        <span class="workflow-bar-status" id="workflowBarStatus">IDLE</span>
+                        <button class="workflow-toggle" id="workflowToggle" type="button" aria-expanded="false" aria-controls="workflowPanel">View steps</button>
+                    </div>
+                </div>
+
+                <!-- Workflow Panel (details) -->
                 <div class="workflow-panel hidden" id="workflowPanel">
                     <div class="workflow-header">
                         <div class="workflow-title">
@@ -132,9 +148,12 @@
                                 <circle cx="12" cy="12" r="10"/>
                                 <polyline points="12,6 12,12 16,14"/>
                             </svg>
-                            <span>Workflow</span>
+                            <span>Workflow Details</span>
                         </div>
-                        <div class="workflow-status" id="workflowStatus">IDLE</div>
+                        <div class="workflow-actions">
+                            <div class="workflow-status" id="workflowStatus">IDLE</div>
+                            <button class="workflow-close" id="workflowClose" type="button" aria-label="Close workflow panel">&times;</button>
+                        </div>
                     </div>
 
                     <div class="workflow-phases" id="workflowPhases">
