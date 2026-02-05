@@ -3,9 +3,11 @@ Agent Orchestrator - Central coordinator using LangGraph REACT pattern.
 
 This is the root agent that:
 - Parses user intent
+- Creates task plans for complex multi-step workflows
 - Routes to appropriate sub-agents
-- Manages multi-step workflows
-- Coordinates tool execution
+- Manages multi-step workflows with task queue
+- Coordinates tool execution with proper step-wise progress
+- Integrates web search and RAG for information gathering
 """
 
 import asyncio
@@ -33,6 +35,7 @@ from intelclaw.agent.base import (
     BaseAgent,
 )
 from intelclaw.agent.router import IntentRouter
+from intelclaw.agent.task_planner import TaskPlanner, TaskPlan, TaskStep, TaskStatus as PlanTaskStatus, TaskQueue, QueuedTask, TaskPriority
 from intelclaw.integrations.llm_provider import LLMProvider
 
 if TYPE_CHECKING:
@@ -50,6 +53,12 @@ class AgentState(TypedDict):
     tools_used: List[str]
     iteration: int
     max_iterations: int
+    plan: List[str]
+    current_step: int
+    completed_steps: List[str]
+    consecutive_errors: int
+    needs_replan: bool
+    last_tool_error: Optional[str]
 
 
 class AgentOrchestrator(BaseAgent):
@@ -113,6 +122,40 @@ class AgentOrchestrator(BaseAgent):
         self._conversation_history: List[BaseMessage] = []
         self._max_history = 20
         
+        # Workflow controls (configurable)
+        self._planning_enabled = self.config.get("agent.planning.enabled", True)
+        self._planning_mode = self.config.get("agent.planning.mode", "always")
+        self._planning_max_steps = self.config.get("agent.planning.max_steps", 8)
+        self._planning_replan_on_failure = self.config.get("agent.planning.replan_on_failure", True)
+        self._max_iterations = self.config.get("agent.execution.max_iterations", 12)
+        self._max_tool_calls_per_iteration = self.config.get("agent.execution.max_tool_calls_per_iteration", 3)
+        self._max_consecutive_errors = self.config.get("agent.execution.max_consecutive_errors", 3)
+
+        # Research & retrieval controls
+        self._auto_web_search = self.config.get("agent.research.auto_web_search", True)
+        self._web_search_max_results = self.config.get("agent.research.max_results", 5)
+        self._web_search_depth = self.config.get("agent.research.search_depth", "basic")
+        self._web_context_max_chars = self.config.get("agent.research.max_context_chars", 2000)
+
+        # Task Planner and Queue for autonomous execution
+        self._task_planner: Optional[TaskPlanner] = None
+        self._task_queue: TaskQueue = TaskQueue(max_concurrent=1)
+        self._active_plan: Optional[TaskPlan] = None
+
+        # Live workflow state for UI
+        self._workflow_state: Dict[str, Any] = {
+            "status": self.status.value,
+            "plan": [],
+            "current_step": 0,
+            "current_step_title": None,
+            "completed_steps": [],
+            "next_step": None,
+            "last_tool": None,
+            "last_tool_error": None,
+            "queue": [],
+            "progress": 0,
+        }
+        
         logger.info("AgentOrchestrator created")
     
     async def initialize(self) -> None:
@@ -137,6 +180,27 @@ class AgentOrchestrator(BaseAgent):
         if self.tools:
             self._langchain_tools = await self.tools.get_langchain_tools()
         
+        # Initialize Task Planner for autonomous workflows
+        self._task_planner = TaskPlanner(
+            llm_provider=self._llm_provider,
+            tools=self.tools,
+            memory=self.memory,
+            max_steps=self._planning_max_steps,
+            enable_web_search=self._auto_web_search,
+            enable_rag=True,
+        )
+        
+        # Set up planner callbacks for UI updates
+        self._task_planner._on_plan_created = self._on_plan_created
+        self._task_planner._on_step_started = self._on_step_started
+        self._task_planner._on_step_completed = self._on_step_completed
+        self._task_planner._on_plan_completed = self._on_plan_completed
+        
+        # Initialize task queue for queuing multiple tasks
+        self._task_queue = TaskQueue(max_concurrent=1)
+        
+        logger.info("TaskPlanner and TaskQueue initialized for autonomous workflows")
+        
         # Build the REACT graph
         self._build_graph()
         
@@ -144,12 +208,14 @@ class AgentOrchestrator(BaseAgent):
         await self._initialize_sub_agents()
         
         self.status = AgentStatus.IDLE
+        await self._update_workflow_state(status=self.status.value)
         logger.success("AgentOrchestrator initialized")
     
     async def shutdown(self) -> None:
         """Shutdown the orchestrator."""
         logger.info("Shutting down AgentOrchestrator...")
         self.status = AgentStatus.IDLE
+        await self._update_workflow_state(status=self.status.value)
         
         # Shutdown sub-agents
         for agent in self.sub_agents.values():
@@ -206,12 +272,14 @@ class AgentOrchestrator(BaseAgent):
         workflow = StateGraph(AgentState)
         
         # Add nodes
+        workflow.add_node("plan", self._plan_node)
         workflow.add_node("reason", self._reason_node)
         workflow.add_node("act", self._act_node)
         workflow.add_node("reflect", self._reflect_node)
         
         # Add conditional edges
-        workflow.set_entry_point("reason")
+        workflow.set_entry_point("plan")
+        workflow.add_edge("plan", "reason")
         workflow.add_conditional_edges(
             "reason",
             self._should_continue,
@@ -223,8 +291,9 @@ class AgentOrchestrator(BaseAgent):
         workflow.add_edge("act", "reflect")
         workflow.add_conditional_edges(
             "reflect",
-            self._should_continue,
+            self._route_after_reflect,
             {
+                "plan": "plan",
                 "reason": "reason",
                 "end": END,
             }
@@ -235,6 +304,351 @@ class AgentOrchestrator(BaseAgent):
         self._compiled_graph = workflow.compile()
         
         logger.debug("LangGraph REACT workflow built")
+
+    async def _emit_event(self, name: str, data: Dict[str, Any]) -> None:
+        """Emit an event on the global bus (if available)."""
+        if not self.event_bus:
+            return
+        try:
+            await self.event_bus.emit(name, data, source="agent")
+        except Exception as e:
+            logger.debug(f"Event emit failed ({name}): {e}")
+
+    async def _update_workflow_state(self, **updates: Any) -> None:
+        """Update internal workflow state and broadcast to UI."""
+        self._workflow_state.update(updates)
+        await self._emit_event("agent.workflow", self._workflow_state)
+    
+    # =========================================================================
+    # Task Planner Callbacks for UI Updates
+    # =========================================================================
+    
+    def _on_plan_created(self, plan: TaskPlan) -> None:
+        """Callback when a new plan is created."""
+        asyncio.create_task(self._async_on_plan_created(plan))
+    
+    async def _async_on_plan_created(self, plan: TaskPlan) -> None:
+        """Async handler for plan creation."""
+        self._active_plan = plan
+        step_titles = [s.title for s in plan.steps]
+        
+        await self._update_workflow_state(
+            status=AgentStatus.THINKING.value,
+            plan=step_titles,
+            current_step=0,
+            current_step_title=plan.steps[0].title if plan.steps else None,
+            next_step=plan.steps[1].title if len(plan.steps) > 1 else None,
+            completed_steps=[],
+            progress=0,
+        )
+        
+        await self._emit_event("agent.plan.created", {
+            "plan_id": plan.id,
+            "goal": plan.goal,
+            "steps": [s.to_dict() for s in plan.steps],
+            "total_steps": len(plan.steps),
+        })
+        
+        logger.info(f"Plan created with {len(plan.steps)} steps: {step_titles}")
+    
+    def _on_step_started(self, step: TaskStep) -> None:
+        """Callback when a step starts execution."""
+        asyncio.create_task(self._async_on_step_started(step))
+    
+    async def _async_on_step_started(self, step: TaskStep) -> None:
+        """Async handler for step start."""
+        plan = self._active_plan
+        if not plan:
+            return
+        
+        step_idx = next((i for i, s in enumerate(plan.steps) if s.id == step.id), 0)
+        next_step = plan.steps[step_idx + 1] if step_idx + 1 < len(plan.steps) else None
+        
+        await self._update_workflow_state(
+            status=AgentStatus.EXECUTING.value,
+            current_step=step_idx,
+            current_step_title=step.title,
+            next_step=next_step.title if next_step else None,
+            last_tool=step.tool,
+        )
+        
+        await self._emit_event("agent.step.started", {
+            "step_id": step.id,
+            "step_index": step_idx,
+            "title": step.title,
+            "tool": step.tool,
+        })
+        
+        logger.info(f"Executing step {step_idx + 1}/{len(plan.steps)}: {step.title}")
+    
+    def _on_step_completed(self, step: TaskStep) -> None:
+        """Callback when a step completes."""
+        asyncio.create_task(self._async_on_step_completed(step))
+    
+    async def _async_on_step_completed(self, step: TaskStep) -> None:
+        """Async handler for step completion."""
+        plan = self._active_plan
+        if not plan:
+            return
+        
+        completed = [s.title for s in plan.completed_steps]
+        progress = plan.progress_percent
+        
+        await self._update_workflow_state(
+            completed_steps=completed,
+            progress=progress,
+            last_tool_error=step.error if step.status == PlanTaskStatus.FAILED else None,
+        )
+        
+        await self._emit_event("agent.step.completed", {
+            "step_id": step.id,
+            "title": step.title,
+            "status": step.status.value,
+            "result": step.result[:500] if step.result else None,
+            "error": step.error,
+            "progress": progress,
+        })
+        
+        status = "✓" if step.status == PlanTaskStatus.COMPLETED else "✗"
+        logger.info(f"Step {status} {step.title}: {step.result[:100] if step.result else step.error or 'done'}")
+    
+    def _on_plan_completed(self, plan: TaskPlan) -> None:
+        """Callback when a plan completes."""
+        asyncio.create_task(self._async_on_plan_completed(plan))
+    
+    async def _async_on_plan_completed(self, plan: TaskPlan) -> None:
+        """Async handler for plan completion."""
+        await self._update_workflow_state(
+            status=AgentStatus.IDLE.value,
+            progress=100 if plan.is_complete else plan.progress_percent,
+        )
+        
+        await self._emit_event("agent.plan.completed", {
+            "plan_id": plan.id,
+            "status": plan.status.value,
+            "completed_steps": len(plan.completed_steps),
+            "failed_steps": len(plan.failed_steps),
+        })
+        
+        self._active_plan = None
+        logger.info(f"Plan {plan.id} completed: {plan.status.value}")
+
+    def _needs_web_research(self, message: str) -> bool:
+        """Heuristic: decide if a query needs web search."""
+        msg = (message or "").lower()
+        indicators = [
+            "latest", "recent", "today", "current", "news", "trend", "trends",
+            "this week", "this month", "update", "release", "announcement",
+            "breaking", "market", "report", "survey", "benchmark"
+        ]
+        return any(ind in msg for ind in indicators)
+
+    async def _fetch_web_context(self, query: str) -> str:
+        """Fetch web search results for a query using available tools."""
+        if not self.tools:
+            return ""
+        try:
+            results = await self.tools.execute(
+                "tavily_search",
+                {
+                    "query": query,
+                    "max_results": self._web_search_max_results,
+                    "search_depth": self._web_search_depth,
+                },
+            )
+        except Exception as e:
+            logger.debug(f"Web search failed: {e}")
+            return ""
+        
+        if not results or not isinstance(results, list):
+            return ""
+        
+        lines = []
+        for idx, item in enumerate(results[: self._web_search_max_results], start=1):
+            title = item.get("title", "Untitled")
+            snippet = item.get("content", item.get("snippet", ""))[:300]
+            url = item.get("url", "")
+            lines.append(f"{idx}. {title}\n{snippet}\nSource: {url}")
+        
+        context = "\n\n".join(lines)
+        if len(context) > self._web_context_max_chars:
+            context = context[: self._web_context_max_chars] + "..."
+        return context
+
+    def _should_plan(self, user_message: str) -> bool:
+        """Heuristic: determine if the task benefits from a multi-step plan."""
+        msg = (user_message or "").lower()
+        
+        # Explicit multi-step signals
+        indicators = [
+            "and then", "then", "after that", "next", "first", "second", "third",
+            "step", "steps", "multi-step", "workflow", "pipeline",
+            "plan", "roadmap", "sequence", "in order to"
+        ]
+        if any(ind in msg for ind in indicators):
+            return True
+        
+        # Multiple action verbs or conjunctions often imply multi-step
+        action_verbs = ["create", "build", "search", "analyze", "summarize", "write", "fix", "refactor", "deploy", "test", "run", "generate"]
+        verb_hits = sum(1 for v in action_verbs if v in msg)
+        if verb_hits >= 2:
+            return True
+        
+        # Longer requests usually benefit from planning
+        return len(msg) > 200
+    
+    def _is_complex_task(self, user_message: str) -> bool:
+        """
+        Determine if a task is complex enough to use the TaskPlanner.
+        
+        Complex tasks benefit from structured planning, step-by-step execution,
+        and progress tracking via the TaskPlanner.
+        """
+        msg = (user_message or "").lower()
+        
+        # Strong indicators of complex multi-step tasks
+        complex_indicators = [
+            # Explicit complexity markers
+            "step by step", "step-by-step", "multi-step", "multiple steps",
+            "workflow", "pipeline", "automation", "autonomous",
+            
+            # Sequential operations
+            "first", "second", "third", "then", "after that", "finally",
+            "in order", "sequence", "series of",
+            
+            # Project-level tasks
+            "project", "application", "system", "full", "complete",
+            "build", "create", "implement", "develop",
+            
+            # Research and analysis
+            "research", "investigate", "analyze", "compare",
+            "find and", "search and", "gather and",
+            
+            # Multiple outputs
+            "several", "multiple", "various", "all", "each",
+        ]
+        
+        if any(ind in msg for ind in complex_indicators):
+            return True
+        
+        # Count distinct action verbs - 3+ suggests complexity
+        action_verbs = [
+            "create", "build", "search", "find", "analyze", "summarize",
+            "write", "fix", "refactor", "deploy", "test", "run", "generate",
+            "install", "configure", "setup", "update", "modify", "edit",
+            "delete", "remove", "add", "integrate", "implement", "design"
+        ]
+        verb_hits = sum(1 for v in action_verbs if v in msg)
+        if verb_hits >= 3:
+            return True
+        
+        # Very long requests often indicate complex tasks
+        if len(msg) > 300:
+            return True
+        
+        # Check for "and" conjunctions suggesting multiple operations
+        and_count = msg.count(" and ")
+        if and_count >= 2:
+            return True
+        
+        return False
+
+    def _parse_plan(self, content: str) -> List[str]:
+        """Parse a plan from LLM output (JSON list or bullet list)."""
+        if not content:
+            return []
+        
+        # Try JSON extraction first
+        try:
+            json_start = content.find("[")
+            json_end = content.rfind("]")
+            if json_start != -1 and json_end != -1 and json_end > json_start:
+                parsed = json.loads(content[json_start:json_end + 1])
+                if isinstance(parsed, list):
+                    steps = [str(s).strip() for s in parsed if str(s).strip()]
+                    return steps[: self._planning_max_steps]
+        except Exception:
+            pass
+        
+        # Fallback to line-based parsing
+        steps = []
+        for line in content.splitlines():
+            stripped = line.strip().lstrip("-").lstrip("*").strip()
+            if not stripped:
+                continue
+            # Remove "1.", "2)" prefixes
+            if stripped[0].isdigit():
+                stripped = stripped.lstrip("0123456789").lstrip(".").lstrip(")").strip()
+            if stripped:
+                steps.append(stripped)
+        
+        return steps[: self._planning_max_steps]
+
+    async def _plan_node(self, state: AgentState) -> AgentState:
+        """Planning node - generate a multi-step plan when needed."""
+        if not self._planning_enabled:
+            return state
+        
+        # Only plan if we don't already have a plan or a replan is requested
+        if state.get("plan") and not state.get("needs_replan"):
+            return state
+        
+        # Determine if the task warrants planning
+        user_message = ""
+        if state.get("messages"):
+            last_msg = state["messages"][-1]
+            if hasattr(last_msg, "content"):
+                user_message = last_msg.content
+        
+        if self._planning_mode == "adaptive" and not self._should_plan(user_message):
+            return state
+        
+        # Ensure LLM available
+        if self._llm is None:
+            await self._try_reinitialize_llm()
+            if self._llm is None:
+                return state
+        
+        system_prompt = (
+            "You are a senior software agent planner. Create a concise, actionable plan "
+            f"with at most {self._planning_max_steps} steps. "
+            "Return ONLY a JSON array of strings (no extra text)."
+        )
+        
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message or "Create a plan for the task.")
+        ]
+        
+        try:
+            response = await self._llm.ainvoke(messages)
+            plan_steps = self._parse_plan(response.content if hasattr(response, "content") else str(response))
+        except Exception as e:
+            logger.debug(f"Planning failed: {e}")
+            plan_steps = []
+        
+        if not plan_steps:
+            return state
+        
+        await self._update_workflow_state(
+            status=AgentStatus.THINKING.value,
+            plan=plan_steps,
+            current_step=0,
+            completed_steps=[],
+        )
+        await self._emit_event("agent.plan", {
+            "plan": plan_steps,
+            "current_step": 0,
+            "completed_steps": [],
+        })
+        
+        return {
+            **state,
+            "plan": plan_steps,
+            "current_step": 0,
+            "completed_steps": [],
+            "needs_replan": False,
+        }
     
     async def _reason_node(self, state: AgentState) -> AgentState:
         """
@@ -244,6 +658,7 @@ class AgentOrchestrator(BaseAgent):
         whether to use tools or provide a direct response.
         """
         self.status = AgentStatus.THINKING
+        await self._update_workflow_state(status=self.status.value)
         
         # Check if LLM is initialized
         if self._llm is None:
@@ -260,8 +675,18 @@ class AgentOrchestrator(BaseAgent):
                     "iteration": state["iteration"] + 1,
                 }
         
-        # Build prompt with tools
-        system_prompt = self._get_system_prompt(state["context"])
+        # Build prompt with tools and workflow context
+        prompt_context = dict(state["context"])
+        if state.get("plan"):
+            prompt_context["plan"] = state.get("plan", [])
+            prompt_context["current_step"] = state.get("current_step", 0)
+            prompt_context["completed_steps"] = state.get("completed_steps", [])
+        if state.get("last_tool_error"):
+            prompt_context["last_tool_error"] = state.get("last_tool_error")
+        prompt_context["iteration"] = state.get("iteration", 0)
+        prompt_context["max_iterations"] = state.get("max_iterations", self._max_iterations)
+        
+        system_prompt = self._get_system_prompt(prompt_context)
         
         messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
         
@@ -298,6 +723,7 @@ class AgentOrchestrator(BaseAgent):
         Processes tool calls from the reasoning step.
         """
         self.status = AgentStatus.EXECUTING
+        await self._update_workflow_state(status=self.status.value)
         
         last_message = state["messages"][-1]
         
@@ -306,8 +732,17 @@ class AgentOrchestrator(BaseAgent):
         
         tool_results = []
         tools_used = list(state["tools_used"])
+        consecutive_errors = state.get("consecutive_errors", 0)
+        last_tool_error = state.get("last_tool_error")
         
-        for tool_call in last_message.tool_calls:
+        tool_calls = list(last_message.tool_calls)
+        if self._max_tool_calls_per_iteration and len(tool_calls) > self._max_tool_calls_per_iteration:
+            logger.warning(
+                f"Too many tool calls ({len(tool_calls)}). Limiting to {self._max_tool_calls_per_iteration}."
+            )
+            tool_calls = tool_calls[: self._max_tool_calls_per_iteration]
+        
+        for tool_call in tool_calls:
             if isinstance(tool_call, dict):
                 tool_name = tool_call.get("name")
                 tool_args = tool_call.get("args", tool_call.get("arguments"))
@@ -332,23 +767,51 @@ class AgentOrchestrator(BaseAgent):
             logger.debug(f"Executing tool: {tool_name}")
             tools_used.append(tool_name)
             
+            await self._emit_event("tool.call", {
+                "id": tool_call_id,
+                "name": tool_name,
+                "args": tool_args,
+            })
+            
             # Execute the tool
             result = await self._execute_tool(tool_name, tool_args)
             
+            result_text = str(result)
+            if result_text.lower().startswith("error"):
+                consecutive_errors += 1
+                last_tool_error = result_text[:500]
+            else:
+                consecutive_errors = 0
+                last_tool_error = None
+            
+            await self._emit_event("tool.result", {
+                "id": tool_call_id,
+                "name": tool_name,
+                "success": not result_text.lower().startswith("error"),
+                "result": result_text[:1000],
+            })
+            
             tool_results.append(
                 ToolMessage(
-                    content=str(result),
+                    content=result_text,
                     tool_call_id=tool_call_id,
                     name=tool_name,
                 )
             )
         
         new_messages = list(state["messages"]) + tool_results
+        if tools_used:
+            await self._update_workflow_state(
+                last_tool=tools_used[-1],
+                last_tool_error=last_tool_error,
+            )
         
         return {
             **state,
             "messages": new_messages,
             "tools_used": tools_used,
+            "consecutive_errors": consecutive_errors,
+            "last_tool_error": last_tool_error,
         }
     
     async def _reflect_node(self, state: AgentState) -> AgentState:
@@ -367,7 +830,45 @@ class AgentOrchestrator(BaseAgent):
                 "timestamp": datetime.now().isoformat(),
             }
             new_thoughts = list(state["thoughts"]) + [thought]
-            return {**state, "thoughts": new_thoughts}
+            
+            # Update plan progress (best-effort)
+            current_step = state.get("current_step", 0)
+            plan = state.get("plan", [])
+            completed_steps = list(state.get("completed_steps", []))
+            if plan:
+                step_idx = min(current_step, max(len(plan) - 1, 0))
+                if plan and step_idx < len(plan):
+                    step_text = plan[step_idx]
+                    if step_text not in completed_steps:
+                        completed_steps.append(step_text)
+                current_step = min(step_idx + 1, len(plan))
+            
+            # Trigger replan if too many consecutive errors
+            needs_replan = state.get("needs_replan", False)
+            current_error = state.get("last_tool_error")
+            if self._planning_replan_on_failure and state.get("consecutive_errors", 0) >= self._max_consecutive_errors:
+                needs_replan = True
+            
+            await self._update_workflow_state(
+                status=AgentStatus.THINKING.value,
+                current_step=current_step,
+                completed_steps=completed_steps,
+                last_tool_error=current_error if needs_replan else None,
+            )
+            await self._emit_event("agent.plan.update", {
+                "plan": plan,
+                "current_step": current_step,
+                "completed_steps": completed_steps,
+                "needs_replan": needs_replan,
+            })
+            
+            return {
+                **state,
+                "thoughts": new_thoughts,
+                "current_step": current_step,
+                "completed_steps": completed_steps,
+                "needs_replan": needs_replan,
+            }
         
         return state
     
@@ -383,6 +884,11 @@ class AgentOrchestrator(BaseAgent):
         # Log current iteration (no hard limit - let LLM decide when complete)
         if state["iteration"] > 0:
             logger.debug(f"REACT iteration: {state['iteration']}")
+        
+        # Enforce iteration limit to avoid infinite loops
+        if state.get("max_iterations") and state["iteration"] >= state["max_iterations"]:
+            logger.warning(f"Reached max iterations ({state['max_iterations']}). Ending loop.")
+            return "end"
         
         # Check last message
         last_message = state["messages"][-1] if state["messages"] else None
@@ -403,6 +909,17 @@ class AgentOrchestrator(BaseAgent):
             return "end"
         
         return "end"
+
+    def _route_after_reflect(self, state: AgentState) -> str:
+        """Route after reflect: replan, continue, or end."""
+        # Stop if max iterations reached
+        if state.get("max_iterations") and state["iteration"] >= state["max_iterations"]:
+            return "end"
+        
+        if state.get("needs_replan"):
+            return "plan"
+        
+        return self._should_continue(state)
     
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
         """Execute a tool through the registry."""
@@ -520,6 +1037,10 @@ class AgentOrchestrator(BaseAgent):
 You MUST use tools when the user asks you to perform actions.
 Think step by step before taking action.
 Be security-conscious - ask for confirmation for sensitive operations.
+If an execution plan is present, follow it step-by-step and use tools to complete each step.
+If a step fails repeatedly, consider replanning or ask the user for clarification.
+Never claim you completed an action unless a tool result confirms it.
+Focus only on the current plan step unless the user changes the goal.
 """)
         
         # Current runtime context
@@ -530,6 +1051,21 @@ Be security-conscious - ask for confirmation for sensitive operations.
         
         if context.get("screen_text"):
             sections.append(f"Visible Text: {context['screen_text'][:500]}...\n")
+        
+        # Workflow plan context
+        if context.get("plan"):
+            plan = context.get("plan", [])
+            completed = set(context.get("completed_steps", []))
+            current_step = context.get("current_step", 0)
+            sections.append("## Execution Plan\n")
+            for idx, step in enumerate(plan, start=1):
+                status = "done" if step in completed else "next" if idx - 1 == current_step else "pending"
+                sections.append(f"{idx}. [{status}] {step}\n")
+            sections.append(f"Current step index: {current_step}\n")
+        
+        if context.get("last_tool_error"):
+            sections.append("## Last Tool Error\n")
+            sections.append(f"{context['last_tool_error']}\n")
         
         # User preferences (from Mem0 and context)
         if context.get("user_preferences"):
@@ -549,6 +1085,12 @@ Be security-conscious - ask for confirmation for sensitive operations.
         if context.get("rag_context"):
             sections.append("## Retrieved Context (from persona and memory)\n")
             sections.append(context["rag_context"])
+            sections.append("\n")
+
+        # Add Web context if available
+        if context.get("web_context"):
+            sections.append("## Web Context (fresh search results)\n")
+            sections.append(context["web_context"])
             sections.append("\n")
         
         return "\n".join(sections)
@@ -577,6 +1119,9 @@ Be security-conscious - ask for confirmation for sensitive operations.
         """
         Process a request through the REACT pipeline.
         
+        For complex multi-step tasks, uses TaskPlanner for structured planning
+        and step-by-step execution with progress tracking.
+        
         Args:
             context: Full context for the request
             
@@ -585,48 +1130,257 @@ Be security-conscious - ask for confirmation for sensitive operations.
         """
         start_time = time.time()
         self.clear_thoughts()
+        await self._update_workflow_state(
+            status=AgentStatus.THINKING.value,
+            plan=[],
+            current_step=0,
+            completed_steps=[],
+            last_tool=None,
+            last_tool_error=None,
+            progress=0,
+        )
         
         # Check if should delegate to sub-agent
         delegation = await self.router.route(context)
-        if delegation and delegation.confidence > 0.8:
+        if delegation and delegation.confidence > 0.8 and not self._should_plan(context.user_message):
             sub_agent = self.sub_agents.get(delegation.agent_name)
             if sub_agent:
                 logger.info(f"Delegating to {delegation.agent_name}")
                 return await sub_agent.process(context)
         
+        # =========================================================================
+        # COMPLEX TASK HANDLING: Use TaskPlanner for multi-step tasks
+        # =========================================================================
+        if self._task_planner and self._is_complex_task(context.user_message):
+            logger.info("Complex task detected - using TaskPlanner for structured execution")
+            return await self._process_with_task_planner(context, start_time)
+        
+        # =========================================================================
+        # SIMPLE TASK HANDLING: Use standard REACT workflow
+        # =========================================================================
+        return await self._process_with_react(context, start_time)
+    
+    async def _process_with_task_planner(
+        self, context: AgentContext, start_time: float
+    ) -> AgentResponse:
+        """
+        Process a complex request using the TaskPlanner for structured execution.
+        
+        This method handles multi-step tasks by:
+        1. Creating a detailed plan with the TaskPlanner
+        2. Executing each step with progress tracking
+        3. Broadcasting updates to the UI via events
+        4. Handling failures with automatic replanning
+        
+        Args:
+            context: Full context for the request
+            start_time: Request start time for latency calculation
+            
+        Returns:
+            Complete agent response with execution results
+        """
+        logger.info(f"Processing complex task with TaskPlanner: {context.user_message[:100]}...")
+        
+        # Gather additional context for planning
+        additional_context = {}
+        
+        # Get RAG context from memory
+        if self.memory and hasattr(self.memory, 'get_rag_context'):
+            try:
+                rag_context = await self.memory.get_rag_context(
+                    query=context.user_message,
+                    include_persona=True,
+                    include_session=True,
+                    max_context_chars=3000
+                )
+                if rag_context:
+                    additional_context["rag_context"] = rag_context
+            except Exception as e:
+                logger.warning(f"Failed to get RAG context for planning: {e}")
+        
+        # Get web context if needed
+        if self._auto_web_search and self._needs_web_research(context.user_message):
+            try:
+                web_context = await self._fetch_web_context(context.user_message)
+                if web_context:
+                    additional_context["web_context"] = web_context
+            except Exception as e:
+                logger.warning(f"Failed to get web context for planning: {e}")
+        
+        # Add screen context
+        if context.screen_context:
+            additional_context["screen_context"] = context.screen_context.get("text", "")[:1000]
+        if context.active_window:
+            additional_context["active_window"] = context.active_window
+        
+        try:
+            # Step 1: Create the plan
+            await self._update_workflow_state(
+                status=AgentStatus.THINKING.value,
+                current_step_title="Creating execution plan...",
+            )
+            
+            plan = await self._task_planner.create_plan(
+                goal=context.user_message,
+                context=additional_context
+            )
+            
+            if not plan or not plan.steps:
+                logger.warning("TaskPlanner failed to create a plan, falling back to REACT")
+                return await self._process_with_react(context, start_time)
+            
+            # Step 2: Add plan to queue if using task queue
+            if self._task_queue:
+                self._task_queue.add_task(plan)
+            
+            # Step 3: Execute the plan
+            await self._update_workflow_state(
+                status=AgentStatus.EXECUTING.value,
+                current_step_title=plan.steps[0].title if plan.steps else "Executing...",
+            )
+            
+            result = await self._task_planner.execute_plan(plan)
+            
+            # Step 4: Build response from execution results
+            thoughts = []
+            tools_used = []
+            
+            for i, step in enumerate(plan.steps):
+                thought = AgentThought(
+                    step=i + 1,
+                    thought=f"{step.title}: {step.result or step.error or 'completed'}",
+                    action=step.tool,
+                    timestamp=datetime.now(),
+                )
+                thoughts.append(thought)
+                if step.tool:
+                    tools_used.append(step.tool)
+            
+            # Build the final answer
+            if plan.is_complete:
+                # Synthesize a final answer from the results
+                answer = await self._synthesize_plan_response(plan, context.user_message)
+            else:
+                # Plan partially completed or failed
+                completed = [s.title for s in plan.completed_steps]
+                failed = [f"{s.title}: {s.error}" for s in plan.failed_steps]
+                
+                answer = f"I completed {len(completed)} of {len(plan.steps)} steps.\n\n"
+                if completed:
+                    answer += "✓ Completed:\n" + "\n".join(f"  - {c}" for c in completed) + "\n\n"
+                if failed:
+                    answer += "✗ Failed:\n" + "\n".join(f"  - {f}" for f in failed) + "\n\n"
+                answer += f"Final result: {result}"
+            
+            latency = (time.time() - start_time) * 1000
+            
+            # Store in memory
+            if self.memory:
+                await self.memory.store_interaction(
+                    user_message=context.user_message,
+                    agent_response=answer,
+                    tools_used=tools_used,
+                )
+            
+            self.status = AgentStatus.IDLE
+            await self._update_workflow_state(
+                status=self.status.value,
+                progress=100 if plan.is_complete else plan.progress_percent,
+            )
+            
+            return AgentResponse(
+                answer=answer,
+                thoughts=thoughts,
+                tools_used=tools_used,
+                latency_ms=latency,
+                success=plan.is_complete,
+            )
+            
+        except Exception as e:
+            logger.error(f"TaskPlanner execution failed: {e}")
+            # Fallback to REACT workflow
+            logger.info("Falling back to standard REACT workflow")
+            return await self._process_with_react(context, start_time)
+    
+    async def _synthesize_plan_response(self, plan: TaskPlan, original_goal: str) -> str:
+        """
+        Synthesize a coherent final response from plan execution results.
+        
+        Uses the LLM to create a natural response summarizing what was accomplished.
+        """
+        if not self._llm:
+            # Fallback to simple concatenation
+            results = []
+            for step in plan.completed_steps:
+                if step.result:
+                    results.append(f"• {step.title}: {step.result[:200]}")
+            return "Here's what I accomplished:\n\n" + "\n".join(results)
+        
+        # Build a summary of what was done
+        step_summaries = []
+        for step in plan.steps:
+            status = "✓" if step.status == PlanTaskStatus.COMPLETED else "✗"
+            result_preview = (step.result or step.error or "")[:150]
+            step_summaries.append(f"{status} {step.title}: {result_preview}")
+        
+        synthesis_prompt = f"""You are summarizing the results of a multi-step task execution.
+
+Original Goal: {original_goal}
+
+Execution Results:
+{chr(10).join(step_summaries)}
+
+Please provide a concise, helpful summary of what was accomplished. 
+Focus on the key outcomes and any important information discovered.
+Be conversational and natural in your response."""
+
+        try:
+            from langchain_core.messages import HumanMessage as LCHumanMessage
+            response = await self._llm.ainvoke([LCHumanMessage(content=synthesis_prompt)])
+            return response.content if hasattr(response, 'content') else str(response)
+        except Exception as e:
+            logger.warning(f"Failed to synthesize response: {e}")
+            # Fallback
+            results = [f"• {s.title}: {s.result[:100] if s.result else 'done'}" 
+                      for s in plan.completed_steps]
+            return "Here's what I accomplished:\n\n" + "\n".join(results)
+    
+    async def _process_with_react(self, context: AgentContext, start_time: float) -> AgentResponse:
+        """
+        Process using the standard REACT workflow (existing implementation).
+        
+        This is the original REACT graph-based processing, extracted to a separate
+        method for use as a fallback when TaskPlanner isn't suitable.
+        """
         # PRIORITY 1: First search persona files and vector memory for relevant data
-        # This implements the persona-first retrieval strategy
         rag_context = ""
         user_preferences_context = ""
+        web_context = ""
         
         if self.memory and hasattr(self.memory, 'get_rag_context'):
             try:
-                # Get context from persona files and vector store
                 rag_context = await self.memory.get_rag_context(
                     query=context.user_message,
-                    include_persona=True,  # Prioritize persona files first
+                    include_persona=True,
                     include_session=True,
                     max_context_chars=5000
                 )
                 
-                # Also get user preferences from Mem0
                 if hasattr(self.memory, 'agentic_rag') and self.memory.agentic_rag:
                     prefs = await self.memory.agentic_rag.get_user_preferences(context.user_message)
                     if prefs:
                         user_preferences_context = "\n".join([
                             f"- {p.get('content', '')}" for p in prefs[:5]
                         ])
-                        
             except Exception as e:
                 logger.warning(f"Failed to get RAG context: {e}")
+
+        if self._auto_web_search and self._needs_web_research(context.user_message):
+            web_context = await self._fetch_web_context(context.user_message)
         
-        # Build initial state
         user_message = HumanMessage(content=context.user_message)
-        
-        # Add conversation history
         history_messages = self._conversation_history[-self._max_history:]
         
-        # Combine user preferences from context and Mem0
         combined_preferences = context.user_preferences or {}
         if user_preferences_context:
             combined_preferences["mem0_preferences"] = user_preferences_context
@@ -637,38 +1391,56 @@ Be security-conscious - ask for confirmation for sensitive operations.
                 "screen_text": context.screen_context.get("text") if context.screen_context else None,
                 "active_window": context.active_window,
                 "user_preferences": combined_preferences,
-                "rag_context": rag_context,  # Add RAG context (persona + vector + mem0)
+                "rag_context": rag_context,
+                "web_context": web_context,
             },
             "thoughts": [],
             "tools_used": [],
             "iteration": 0,
-            "max_iterations": 999999,  # Effectively unlimited - let LLM decide when to stop
+            "max_iterations": self._max_iterations,
+            "plan": [],
+            "current_step": 0,
+            "completed_steps": [],
+            "consecutive_errors": 0,
+            "needs_replan": False,
+            "last_tool_error": None,
         }
         
-        # Run the graph
         try:
-            # Check if we have a valid compiled graph
             if self._compiled_graph is None:
                 logger.warning("No compiled graph, using direct LLM")
                 return await self._direct_llm_response(context, start_time)
             
             final_state = await self._compiled_graph.ainvoke(initial_state)
             
-            # Extract final answer
             last_ai_message = None
             for msg in reversed(final_state["messages"]):
                 if isinstance(msg, AIMessage):
                     last_ai_message = msg
                     break
             
-            answer = last_ai_message.content if last_ai_message else "I couldn't generate a response."
+            answer = last_ai_message.content if last_ai_message else ""
+            if not answer:
+                last_tool_message = None
+                for msg in reversed(final_state["messages"]):
+                    if isinstance(msg, ToolMessage):
+                        last_tool_message = msg
+                        break
+                
+                if final_state.get("iteration", 0) >= final_state.get("max_iterations", 0):
+                    answer = "I paused after reaching the maximum planning/execution steps. "
+                else:
+                    answer = "I couldn't generate a final response. "
+                
+                if last_tool_message:
+                    answer += f"Last tool output ({last_tool_message.name}): {last_tool_message.content[:500]}"
+                else:
+                    answer += "Please clarify if you'd like me to continue or adjust the plan."
             
-            # Update conversation history
             self._conversation_history.append(user_message)
             if last_ai_message:
                 self._conversation_history.append(last_ai_message)
             
-            # Convert thoughts
             thoughts = [
                 AgentThought(
                     step=t.get("step", 0),
@@ -681,7 +1453,6 @@ Be security-conscious - ask for confirmation for sensitive operations.
             
             latency = (time.time() - start_time) * 1000
             
-            # Store in memory
             if self.memory:
                 await self.memory.store_interaction(
                     user_message=context.user_message,
@@ -689,7 +1460,6 @@ Be security-conscious - ask for confirmation for sensitive operations.
                     tools_used=final_state["tools_used"],
                 )
                 
-                # Store session for future RAG context
                 if hasattr(self.memory, 'rag_store_session'):
                     import uuid
                     session_messages = [
@@ -705,14 +1475,13 @@ Be security-conscious - ask for confirmation for sensitive operations.
                     except Exception as e:
                         logger.warning(f"Failed to store RAG session: {e}")
                 
-                # Extract and store user preferences from conversation
-                # This enables the agent to remember user preferences
                 await self._extract_and_store_preferences(
                     user_message=context.user_message,
                     agent_response=answer
                 )
             
             self.status = AgentStatus.IDLE
+            await self._update_workflow_state(status=self.status.value)
             
             return AgentResponse(
                 answer=answer,
@@ -723,20 +1492,8 @@ Be security-conscious - ask for confirmation for sensitive operations.
             )
             
         except Exception as e:
-            logger.error(f"Agent processing error: {e}")
-            # Try direct LLM fallback
-            try:
-                return await self._direct_llm_response(context, start_time)
-            except Exception as e2:
-                logger.error(f"Fallback also failed: {e2}")
-                self.status = AgentStatus.ERROR
-                
-                return AgentResponse(
-                    answer=f"I encountered an error: {str(e)}",
-                    success=False,
-                    error=str(e),
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
+            logger.error(f"REACT processing error: {e}")
+            return await self._direct_llm_response(context, start_time)
     
     async def _direct_llm_response(self, context: AgentContext, start_time: float) -> AgentResponse:
         """
@@ -777,6 +1534,7 @@ Be security-conscious - ask for confirmation for sensitive operations.
             latency = (time.time() - start_time) * 1000
             
             self.status = AgentStatus.IDLE
+            await self._update_workflow_state(status=self.status.value)
             
             return AgentResponse(
                 answer=answer,
@@ -841,6 +1599,10 @@ Be security-conscious - ask for confirmation for sensitive operations.
                 "available_providers": self._llm_provider.available_providers,
             }
         return {"provider": "unknown", "model": self.MODEL_NAME}
+
+    def get_workflow_state(self) -> Dict[str, Any]:
+        """Get a copy of the current workflow state for UI."""
+        return dict(self._workflow_state)
     
     async def _extract_and_store_preferences(
         self,

@@ -81,6 +81,25 @@ class ConfigManager:
         "tools": {
             "enabled_categories": ["system", "search", "productivity"],
         },
+        "agent": {
+            "planning": {
+                "enabled": True,
+                "mode": "always",
+                "max_steps": 8,
+                "replan_on_failure": True,
+            },
+            "execution": {
+                "max_iterations": 12,
+                "max_tool_calls_per_iteration": 3,
+                "max_consecutive_errors": 3,
+            },
+            "research": {
+                "auto_web_search": True,
+                "max_results": 5,
+                "search_depth": "basic",
+                "max_context_chars": 2000,
+            },
+        },
         "mcp": {
             "enabled": True,
             "servers": [],

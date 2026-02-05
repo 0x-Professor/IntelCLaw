@@ -1194,17 +1194,21 @@ class CopilotLLM:
         return self
     
     def _convert_tools_to_schema(self, tools: List[Any]) -> List[Dict]:
-        """Convert LangChain tools to OpenAI function calling schema."""
+        """Convert tools to OpenAI function calling schema (supports LangChain/MCP/IntelClaw)."""
+        try:
+            from intelclaw.tools.converter import convert_tools_to_openai
+            return convert_tools_to_openai(tools)
+        except Exception as e:
+            logger.warning(f"Tool schema conversion failed, falling back: {e}")
+        
         functions = []
         for tool in tools:
             try:
-                # Get tool schema
+                # Best-effort fallback for LangChain tools
                 if hasattr(tool, 'args_schema') and tool.args_schema:
-                    # Use model_json_schema for Pydantic v2
                     if hasattr(tool.args_schema, 'model_json_schema'):
                         schema = tool.args_schema.model_json_schema()
                     else:
-                        # Fallback for older Pydantic
                         schema = tool.args_schema.schema()
                     properties = schema.get("properties", {})
                     required = schema.get("required", [])
@@ -1215,8 +1219,8 @@ class CopilotLLM:
                 func = {
                     "type": "function",
                     "function": {
-                        "name": tool.name,
-                        "description": tool.description or f"Tool: {tool.name}",
+                        "name": getattr(tool, "name", "unknown_tool"),
+                        "description": getattr(tool, "description", "") or f"Tool: {getattr(tool, 'name', '')}",
                         "parameters": {
                             "type": "object",
                             "properties": properties,
@@ -1225,8 +1229,8 @@ class CopilotLLM:
                     }
                 }
                 functions.append(func)
-            except Exception as e:
-                logger.warning(f"Could not convert tool {tool.name} to schema: {e}")
+            except Exception as ex:
+                logger.warning(f"Could not convert tool to schema: {ex}")
         return functions
 
 

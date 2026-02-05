@@ -30,6 +30,23 @@ models:
   temperature: 0.1
   context_length: 8000
 
+# Agent Workflow Settings
+agent:
+  planning:
+    enabled: true
+    mode: always
+    max_steps: 8
+    replan_on_failure: true
+  execution:
+    max_iterations: 12
+    max_tool_calls_per_iteration: 3
+    max_consecutive_errors: 3
+  research:
+    auto_web_search: true
+    max_results: 5
+    search_depth: basic
+    max_context_chars: 2000
+
 # GitHub Copilot Integration
 copilot:
   enabled: true

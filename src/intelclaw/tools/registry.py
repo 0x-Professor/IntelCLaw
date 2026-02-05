@@ -11,6 +11,7 @@ from langchain_core.tools import BaseTool as LangChainBaseTool
 from loguru import logger
 
 from intelclaw.tools.base import BaseTool, ToolDefinition, ToolResult, ToolCategory
+from intelclaw.tools.converter import convert_tools_to_openai, convert_tools_to_mcp
 
 if TYPE_CHECKING:
     from intelclaw.config.manager import ConfigManager
@@ -230,6 +231,24 @@ class ToolRegistry:
             langchain_tools.append(lc_tool)
         
         return langchain_tools
+
+    def get_openai_tools(self) -> List[Dict[str, Any]]:
+        """
+        Convert registered tools to OpenAI tool schema.
+        
+        Returns:
+            List of OpenAI-compatible tool schemas
+        """
+        return convert_tools_to_openai(list(self._tools.values()))
+
+    def get_mcp_tools(self) -> List[Dict[str, Any]]:
+        """
+        Convert registered tools to MCP tool schema.
+        
+        Returns:
+            List of MCP-compatible tool schemas
+        """
+        return convert_tools_to_mcp(list(self._tools.values()))
     
     async def _register_builtin_tools(self) -> None:
         """Register built-in tools."""

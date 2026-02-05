@@ -1,0 +1,886 @@
+"""
+Task Planner - Autonomous multi-step task planning and execution.
+
+This module implements a sophisticated task planning system that:
+1. Analyzes user requests and breaks them into actionable steps
+2. Determines dependencies between steps
+3. Identifies which steps can run in parallel
+4. Integrates web search and RAG for information gathering
+5. Tracks progress and handles failures with replanning
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+
+from loguru import logger
+from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from intelclaw.integrations.llm_provider import LLMProvider
+    from intelclaw.tools.registry import ToolRegistry
+    from intelclaw.memory.manager import MemoryManager
+
+
+class TaskStatus(str, Enum):
+    """Status of a task step."""
+    PENDING = "pending"
+    QUEUED = "queued"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    BLOCKED = "blocked"
+
+
+class TaskPriority(str, Enum):
+    """Priority level for tasks."""
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+@dataclass
+class TaskStep:
+    """
+    A single step in a multi-step task plan.
+    
+    Attributes:
+        id: Unique identifier for this step
+        title: Short description of the step
+        description: Detailed description of what needs to be done
+        status: Current execution status
+        tool: Optional tool to use for execution
+        tool_args: Arguments to pass to the tool
+        dependencies: IDs of steps that must complete before this one
+        result: Output from execution
+        error: Error message if failed
+        started_at: When execution started
+        completed_at: When execution completed
+        retries: Number of retry attempts
+        max_retries: Maximum allowed retries
+    """
+    id: str
+    title: str
+    description: str = ""
+    status: TaskStatus = TaskStatus.PENDING
+    tool: Optional[str] = None
+    tool_args: Optional[Dict[str, Any]] = None
+    dependencies: List[str] = field(default_factory=list)
+    result: Optional[str] = None
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    retries: int = 0
+    max_retries: int = 2
+    priority: TaskPriority = TaskPriority.NORMAL
+    requires_confirmation: bool = False
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "description": self.description,
+            "status": self.status.value,
+            "tool": self.tool,
+            "tool_args": self.tool_args,
+            "dependencies": self.dependencies,
+            "result": self.result[:500] if self.result else None,
+            "error": self.error,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "retries": self.retries,
+            "priority": self.priority.value,
+        }
+
+
+@dataclass  
+class TaskPlan:
+    """
+    A complete task plan with multiple steps.
+    
+    Attributes:
+        id: Unique plan identifier
+        goal: The original user goal/request
+        steps: Ordered list of task steps
+        created_at: When the plan was created
+        status: Overall plan status
+        context: Additional context for execution
+    """
+    id: str
+    goal: str
+    steps: List[TaskStep] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.now)
+    status: TaskStatus = TaskStatus.PENDING
+    context: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    @property
+    def current_step(self) -> Optional[TaskStep]:
+        """Get the current step being executed."""
+        for step in self.steps:
+            if step.status == TaskStatus.IN_PROGRESS:
+                return step
+        return None
+    
+    @property
+    def next_step(self) -> Optional[TaskStep]:
+        """Get the next step to execute."""
+        for step in self.steps:
+            if step.status == TaskStatus.PENDING:
+                # Check if all dependencies are complete
+                deps_complete = all(
+                    self.get_step(dep_id) and self.get_step(dep_id).status == TaskStatus.COMPLETED
+                    for dep_id in step.dependencies
+                )
+                if deps_complete:
+                    return step
+        return None
+    
+    @property
+    def pending_steps(self) -> List[TaskStep]:
+        """Get all pending steps."""
+        return [s for s in self.steps if s.status == TaskStatus.PENDING]
+    
+    @property
+    def completed_steps(self) -> List[TaskStep]:
+        """Get all completed steps."""
+        return [s for s in self.steps if s.status == TaskStatus.COMPLETED]
+    
+    @property
+    def failed_steps(self) -> List[TaskStep]:
+        """Get all failed steps."""
+        return [s for s in self.steps if s.status == TaskStatus.FAILED]
+    
+    @property
+    def progress_percent(self) -> float:
+        """Calculate completion percentage."""
+        if not self.steps:
+            return 0.0
+        completed = len([s for s in self.steps if s.status == TaskStatus.COMPLETED])
+        return (completed / len(self.steps)) * 100
+    
+    @property
+    def is_complete(self) -> bool:
+        """Check if the plan is fully executed."""
+        return all(s.status in (TaskStatus.COMPLETED, TaskStatus.SKIPPED) for s in self.steps)
+    
+    @property
+    def has_failed(self) -> bool:
+        """Check if the plan has any failed steps."""
+        return any(s.status == TaskStatus.FAILED for s in self.steps)
+    
+    def get_step(self, step_id: str) -> Optional[TaskStep]:
+        """Get a step by ID."""
+        for step in self.steps:
+            if step.id == step_id:
+                return step
+        return None
+    
+    def get_runnable_steps(self) -> List[TaskStep]:
+        """Get all steps that can run now (dependencies satisfied)."""
+        runnable = []
+        completed_ids = {s.id for s in self.steps if s.status == TaskStatus.COMPLETED}
+        
+        for step in self.steps:
+            if step.status != TaskStatus.PENDING:
+                continue
+            
+            # Check dependencies
+            deps_satisfied = all(dep_id in completed_ids for dep_id in step.dependencies)
+            if deps_satisfied:
+                runnable.append(step)
+        
+        return runnable
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "goal": self.goal,
+            "steps": [s.to_dict() for s in self.steps],
+            "created_at": self.created_at.isoformat(),
+            "status": self.status.value,
+            "progress": self.progress_percent,
+            "current_step": self.current_step.to_dict() if self.current_step else None,
+            "next_step": self.next_step.to_dict() if self.next_step else None,
+        }
+
+
+class TaskPlanner:
+    """
+    Intelligent task planner that creates and manages multi-step execution plans.
+    
+    Features:
+    - Breaks down complex requests into actionable steps
+    - Identifies tool requirements for each step
+    - Determines step dependencies and parallelization opportunities
+    - Integrates web search for information gathering
+    - Supports replanning on failure
+    """
+    
+    # Planning prompts
+    PLANNING_SYSTEM_PROMPT = """You are an expert task planner for an autonomous AI agent.
+Your job is to break down user requests into clear, actionable steps.
+
+For each step, determine:
+1. A clear, concise title (what to do)
+2. A detailed description (how to do it)
+3. The tool to use (if any)
+4. Dependencies on other steps
+
+Available tools: {tools}
+
+Guidelines:
+- Each step should be atomic and achievable
+- Identify which steps can run in parallel (no dependencies between them)
+- Add information gathering steps (web search, RAG) when needed
+- Include verification/validation steps for important operations
+- Maximum {max_steps} steps per plan
+
+Return ONLY a JSON array with this structure:
+[
+  {{
+    "id": "step_1",
+    "title": "Short action title",
+    "description": "Detailed description of what to do",
+    "tool": "tool_name_or_null",
+    "tool_args": {{"arg": "value"}} or null,
+    "dependencies": ["step_id"] or [],
+    "requires_info": true/false
+  }}
+]"""
+
+    RESEARCH_PROMPT = """Based on this task, what information do I need to gather first?
+Task: {task}
+
+Consider:
+- Do I need current/latest information? (use web search)
+- Do I need project-specific context? (use RAG/memory)
+- Do I need to verify any assumptions?
+
+Return a JSON object:
+{{
+  "needs_web_search": true/false,
+  "web_search_queries": ["query1", "query2"],
+  "needs_rag": true/false,
+  "rag_queries": ["query1"],
+  "assumptions_to_verify": ["assumption1"]
+}}"""
+    
+    def __init__(
+        self,
+        llm_provider: Optional["LLMProvider"] = None,
+        tools: Optional["ToolRegistry"] = None,
+        memory: Optional["MemoryManager"] = None,
+        max_steps: int = 10,
+        enable_web_search: bool = True,
+        enable_rag: bool = True,
+    ):
+        self.llm_provider = llm_provider
+        self.tools = tools
+        self.memory = memory
+        self.max_steps = max_steps
+        self.enable_web_search = enable_web_search
+        self.enable_rag = enable_rag
+        
+        # Active plans
+        self._plans: Dict[str, TaskPlan] = {}
+        self._current_plan: Optional[str] = None
+        
+        # Event callbacks
+        self._on_plan_created: Optional[Callable[[TaskPlan], None]] = None
+        self._on_step_started: Optional[Callable[[TaskStep], None]] = None
+        self._on_step_completed: Optional[Callable[[TaskStep], None]] = None
+        self._on_plan_completed: Optional[Callable[[TaskPlan], None]] = None
+    
+    async def create_plan(
+        self,
+        goal: str,
+        context: Optional[Dict[str, Any]] = None,
+        force_research: bool = False,
+    ) -> TaskPlan:
+        """
+        Create a new task plan for the given goal.
+        
+        Args:
+            goal: The user's goal/request
+            context: Additional context for planning
+            force_research: Force information gathering step
+            
+        Returns:
+            A TaskPlan with steps to achieve the goal
+        """
+        plan_id = str(uuid.uuid4())[:8]
+        logger.info(f"Creating plan {plan_id} for: {goal[:100]}...")
+        
+        # Step 1: Determine if we need to gather information first
+        research_needed = await self._analyze_research_needs(goal, force_research)
+        
+        # Step 2: Gather information if needed
+        gathered_context = {}
+        if research_needed.get("needs_web_search") and self.enable_web_search:
+            queries = research_needed.get("web_search_queries", [goal])
+            web_results = await self._perform_web_search(queries)
+            gathered_context["web_search"] = web_results
+        
+        if research_needed.get("needs_rag") and self.enable_rag:
+            queries = research_needed.get("rag_queries", [goal])
+            rag_results = await self._perform_rag_search(queries)
+            gathered_context["rag"] = rag_results
+        
+        # Step 3: Generate the plan using LLM
+        steps = await self._generate_plan_steps(goal, context, gathered_context)
+        
+        # Step 4: Create and store the plan
+        plan = TaskPlan(
+            id=plan_id,
+            goal=goal,
+            steps=steps,
+            context=context or {},
+            metadata={
+                "research": research_needed,
+                "gathered_context": gathered_context,
+            }
+        )
+        
+        self._plans[plan_id] = plan
+        self._current_plan = plan_id
+        
+        logger.info(f"Created plan {plan_id} with {len(steps)} steps")
+        
+        if self._on_plan_created:
+            self._on_plan_created(plan)
+        
+        return plan
+    
+    async def _analyze_research_needs(
+        self,
+        goal: str,
+        force: bool = False
+    ) -> Dict[str, Any]:
+        """Analyze what information gathering is needed."""
+        if force:
+            return {
+                "needs_web_search": True,
+                "web_search_queries": [goal],
+                "needs_rag": True,
+                "rag_queries": [goal],
+            }
+        
+        # Quick heuristic check
+        goal_lower = goal.lower()
+        
+        # Keywords indicating need for fresh information
+        web_keywords = [
+            "latest", "recent", "current", "today", "news", "trend",
+            "2024", "2025", "2026", "update", "new", "release"
+        ]
+        
+        needs_web = any(kw in goal_lower for kw in web_keywords)
+        
+        # Keywords indicating need for project context
+        rag_keywords = [
+            "project", "codebase", "my code", "existing", "current",
+            "our", "this", "the file", "our system"
+        ]
+        
+        needs_rag = any(kw in goal_lower for kw in rag_keywords)
+        
+        result = {
+            "needs_web_search": needs_web,
+            "web_search_queries": [goal] if needs_web else [],
+            "needs_rag": needs_rag,
+            "rag_queries": [goal] if needs_rag else [],
+        }
+        
+        # For complex goals, use LLM to analyze
+        if self.llm_provider and len(goal) > 100:
+            try:
+                llm_analysis = await self._llm_analyze_research(goal)
+                result.update(llm_analysis)
+            except Exception as e:
+                logger.debug(f"LLM research analysis failed: {e}")
+        
+        return result
+    
+    async def _llm_analyze_research(self, goal: str) -> Dict[str, Any]:
+        """Use LLM to analyze research needs."""
+        if not self.llm_provider or not self.llm_provider.llm:
+            return {}
+        
+        from langchain_core.messages import SystemMessage, HumanMessage
+        
+        prompt = self.RESEARCH_PROMPT.format(task=goal)
+        
+        try:
+            response = await self.llm_provider.llm.ainvoke([
+                SystemMessage(content="You are a research planning assistant. Return valid JSON only."),
+                HumanMessage(content=prompt),
+            ])
+            
+            content = response.content if hasattr(response, "content") else str(response)
+            
+            # Parse JSON from response
+            json_start = content.find("{")
+            json_end = content.rfind("}") + 1
+            if json_start != -1 and json_end > json_start:
+                return json.loads(content[json_start:json_end])
+        except Exception as e:
+            logger.debug(f"Research analysis parsing failed: {e}")
+        
+        return {}
+    
+    async def _perform_web_search(self, queries: List[str]) -> List[Dict[str, Any]]:
+        """Perform web search for the given queries."""
+        results = []
+        
+        if not self.tools:
+            return results
+        
+        for query in queries[:3]:  # Limit to 3 queries
+            try:
+                search_result = await self.tools.execute(
+                    "tavily_search",
+                    {"query": query, "max_results": 3}
+                )
+                if search_result:
+                    results.extend(search_result if isinstance(search_result, list) else [search_result])
+            except Exception as e:
+                logger.debug(f"Web search failed for '{query}': {e}")
+        
+        return results
+    
+    async def _perform_rag_search(self, queries: List[str]) -> List[Dict[str, Any]]:
+        """Perform RAG search for the given queries."""
+        results = []
+        
+        if not self.memory or not hasattr(self.memory, "get_rag_context"):
+            return results
+        
+        for query in queries[:2]:  # Limit to 2 queries
+            try:
+                context = await self.memory.get_rag_context(
+                    query=query,
+                    include_persona=True,
+                    max_context_chars=2000
+                )
+                if context:
+                    results.append({"query": query, "context": context})
+            except Exception as e:
+                logger.debug(f"RAG search failed for '{query}': {e}")
+        
+        return results
+    
+    async def _generate_plan_steps(
+        self,
+        goal: str,
+        context: Optional[Dict[str, Any]],
+        gathered_context: Dict[str, Any],
+    ) -> List[TaskStep]:
+        """Generate plan steps using LLM."""
+        if not self.llm_provider or not self.llm_provider.llm:
+            # Fallback: single-step plan
+            return [TaskStep(
+                id="step_1",
+                title="Execute request",
+                description=goal,
+                status=TaskStatus.PENDING,
+            )]
+        
+        from langchain_core.messages import SystemMessage, HumanMessage
+        
+        # Get available tools
+        tool_names = []
+        if self.tools:
+            try:
+                tool_names = list(self.tools.get_all().keys())
+            except Exception:
+                pass
+        
+        # Build context string
+        context_str = ""
+        if gathered_context.get("web_search"):
+            context_str += "\n\nWeb Search Results:\n"
+            for item in gathered_context["web_search"][:5]:
+                title = item.get("title", "")
+                snippet = item.get("content", item.get("snippet", ""))[:200]
+                context_str += f"- {title}: {snippet}\n"
+        
+        if gathered_context.get("rag"):
+            context_str += "\n\nProject Context:\n"
+            for item in gathered_context["rag"]:
+                context_str += item.get("context", "")[:500] + "\n"
+        
+        system_prompt = self.PLANNING_SYSTEM_PROMPT.format(
+            tools=", ".join(tool_names[:20]) if tool_names else "None available",
+            max_steps=self.max_steps,
+        )
+        
+        user_prompt = f"Create a step-by-step plan for: {goal}"
+        if context_str:
+            user_prompt += f"\n\nAvailable Context:{context_str}"
+        
+        try:
+            response = await self.llm_provider.llm.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ])
+            
+            content = response.content if hasattr(response, "content") else str(response)
+            steps = self._parse_plan_response(content)
+            
+            if steps:
+                return steps
+        except Exception as e:
+            logger.warning(f"Plan generation failed: {e}")
+        
+        # Fallback
+        return [TaskStep(
+            id="step_1",
+            title="Execute request",
+            description=goal,
+            status=TaskStatus.PENDING,
+        )]
+    
+    def _parse_plan_response(self, content: str) -> List[TaskStep]:
+        """Parse LLM response into TaskSteps."""
+        steps = []
+        
+        try:
+            # Find JSON array in response
+            json_start = content.find("[")
+            json_end = content.rfind("]") + 1
+            
+            if json_start != -1 and json_end > json_start:
+                parsed = json.loads(content[json_start:json_end])
+                
+                for idx, item in enumerate(parsed):
+                    if not isinstance(item, dict):
+                        continue
+                    
+                    step = TaskStep(
+                        id=item.get("id", f"step_{idx + 1}"),
+                        title=item.get("title", f"Step {idx + 1}"),
+                        description=item.get("description", ""),
+                        tool=item.get("tool"),
+                        tool_args=item.get("tool_args"),
+                        dependencies=item.get("dependencies", []),
+                        status=TaskStatus.PENDING,
+                    )
+                    steps.append(step)
+        except json.JSONDecodeError as e:
+            logger.debug(f"Failed to parse plan JSON: {e}")
+        except Exception as e:
+            logger.debug(f"Plan parsing error: {e}")
+        
+        return steps[:self.max_steps]
+    
+    async def execute_plan(
+        self,
+        plan: TaskPlan,
+        executor: Optional[Callable[[TaskStep], Any]] = None,
+        parallel: bool = True,
+    ) -> TaskPlan:
+        """
+        Execute a task plan step by step.
+        
+        Args:
+            plan: The plan to execute
+            executor: Callable to execute each step
+            parallel: Whether to run independent steps in parallel
+            
+        Returns:
+            The completed plan with results
+        """
+        plan.status = TaskStatus.IN_PROGRESS
+        
+        while not plan.is_complete and not plan.has_failed:
+            runnable = plan.get_runnable_steps()
+            
+            if not runnable:
+                # No more steps can run - either done or blocked
+                if plan.pending_steps:
+                    # Steps are blocked
+                    for step in plan.pending_steps:
+                        step.status = TaskStatus.BLOCKED
+                break
+            
+            if parallel and len(runnable) > 1:
+                # Execute in parallel
+                await asyncio.gather(*[
+                    self._execute_step(step, plan, executor)
+                    for step in runnable
+                ])
+            else:
+                # Execute sequentially
+                for step in runnable:
+                    await self._execute_step(step, plan, executor)
+                    
+                    # Check for failure
+                    if step.status == TaskStatus.FAILED and step.retries >= step.max_retries:
+                        break
+        
+        # Determine final plan status
+        if plan.is_complete:
+            plan.status = TaskStatus.COMPLETED
+        elif plan.has_failed:
+            plan.status = TaskStatus.FAILED
+        
+        if self._on_plan_completed:
+            self._on_plan_completed(plan)
+        
+        return plan
+    
+    async def _execute_step(
+        self,
+        step: TaskStep,
+        plan: TaskPlan,
+        executor: Optional[Callable[[TaskStep], Any]],
+    ) -> None:
+        """Execute a single step."""
+        step.status = TaskStatus.IN_PROGRESS
+        step.started_at = datetime.now()
+        
+        if self._on_step_started:
+            self._on_step_started(step)
+        
+        try:
+            if executor:
+                result = await executor(step) if asyncio.iscoroutinefunction(executor) else executor(step)
+                step.result = str(result) if result else "Completed"
+            elif step.tool and self.tools:
+                result = await self.tools.execute(step.tool, step.tool_args or {})
+                step.result = str(result) if result else "Completed"
+            else:
+                step.result = "Step requires manual execution or no executor provided"
+            
+            step.status = TaskStatus.COMPLETED
+            
+        except Exception as e:
+            step.error = str(e)
+            step.retries += 1
+            
+            if step.retries < step.max_retries:
+                step.status = TaskStatus.PENDING  # Will retry
+                logger.warning(f"Step {step.id} failed, will retry ({step.retries}/{step.max_retries})")
+            else:
+                step.status = TaskStatus.FAILED
+                logger.error(f"Step {step.id} failed permanently: {e}")
+        
+        step.completed_at = datetime.now()
+        
+        if self._on_step_completed:
+            self._on_step_completed(step)
+    
+    async def replan(
+        self,
+        plan: TaskPlan,
+        from_step: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> TaskPlan:
+        """
+        Create a new plan based on a failed or incomplete plan.
+        
+        Args:
+            plan: The original plan
+            from_step: Step ID to replan from
+            reason: Reason for replanning
+            
+        Returns:
+            New task plan
+        """
+        # Gather context from completed steps
+        completed_context = []
+        for step in plan.completed_steps:
+            completed_context.append(f"✓ {step.title}: {step.result[:100] if step.result else 'done'}")
+        
+        # Get failed step info
+        failed_info = ""
+        for step in plan.failed_steps:
+            failed_info += f"✗ {step.title} failed: {step.error}\n"
+        
+        # Build new goal with context
+        new_goal = f"""Continue this task: {plan.goal}
+
+Already completed:
+{chr(10).join(completed_context) if completed_context else 'Nothing yet'}
+
+Failed steps:
+{failed_info if failed_info else 'None'}
+
+{f'Reason for replanning: {reason}' if reason else ''}
+
+Please create a revised plan to complete the remaining work."""
+        
+        return await self.create_plan(new_goal, plan.context)
+    
+    def get_current_plan(self) -> Optional[TaskPlan]:
+        """Get the currently active plan."""
+        if self._current_plan and self._current_plan in self._plans:
+            return self._plans[self._current_plan]
+        return None
+    
+    def get_plan(self, plan_id: str) -> Optional[TaskPlan]:
+        """Get a plan by ID."""
+        return self._plans.get(plan_id)
+    
+    def get_all_plans(self) -> List[TaskPlan]:
+        """Get all stored plans."""
+        return list(self._plans.values())
+    
+    def clear_plans(self):
+        """Clear all stored plans."""
+        self._plans.clear()
+        self._current_plan = None
+
+
+# =============================================================================
+# Task Queue for managing multiple concurrent tasks
+# =============================================================================
+
+@dataclass
+class QueuedTask:
+    """A task in the execution queue."""
+    id: str
+    prompt: str
+    priority: TaskPriority
+    plan: Optional[TaskPlan] = None
+    status: TaskStatus = TaskStatus.QUEUED
+    created_at: datetime = field(default_factory=datetime.now)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "prompt": self.prompt[:100],
+            "priority": self.priority.value,
+            "status": self.status.value,
+            "plan": self.plan.to_dict() if self.plan else None,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+class TaskQueue:
+    """
+    Queue for managing multiple tasks with priority.
+    
+    Supports:
+    - Priority-based ordering
+    - Concurrent execution limits
+    - Task dependencies
+    - Progress tracking
+    """
+    
+    def __init__(self, max_concurrent: int = 1):
+        self._queue: List[QueuedTask] = []
+        self._active: Dict[str, QueuedTask] = {}
+        self._completed: List[QueuedTask] = []
+        self._max_concurrent = max_concurrent
+        self._lock = asyncio.Lock()
+        
+        # Callbacks
+        self._on_task_queued: Optional[Callable[[QueuedTask], None]] = None
+        self._on_task_started: Optional[Callable[[QueuedTask], None]] = None
+        self._on_task_completed: Optional[Callable[[QueuedTask], None]] = None
+    
+    async def add(
+        self,
+        prompt: str,
+        priority: TaskPriority = TaskPriority.NORMAL,
+    ) -> QueuedTask:
+        """Add a task to the queue."""
+        async with self._lock:
+            task = QueuedTask(
+                id=str(uuid.uuid4())[:8],
+                prompt=prompt,
+                priority=priority,
+            )
+            
+            # Insert based on priority
+            insert_idx = len(self._queue)
+            for idx, existing in enumerate(self._queue):
+                if self._priority_value(priority) > self._priority_value(existing.priority):
+                    insert_idx = idx
+                    break
+            
+            self._queue.insert(insert_idx, task)
+            
+            if self._on_task_queued:
+                self._on_task_queued(task)
+            
+            return task
+    
+    def _priority_value(self, priority: TaskPriority) -> int:
+        """Convert priority to numeric value."""
+        return {
+            TaskPriority.LOW: 0,
+            TaskPriority.NORMAL: 1,
+            TaskPriority.HIGH: 2,
+            TaskPriority.CRITICAL: 3,
+        }.get(priority, 1)
+    
+    async def get_next(self) -> Optional[QueuedTask]:
+        """Get the next task to execute."""
+        async with self._lock:
+            if len(self._active) >= self._max_concurrent:
+                return None
+            
+            if not self._queue:
+                return None
+            
+            task = self._queue.pop(0)
+            task.status = TaskStatus.IN_PROGRESS
+            self._active[task.id] = task
+            
+            if self._on_task_started:
+                self._on_task_started(task)
+            
+            return task
+    
+    async def complete(self, task_id: str, success: bool = True) -> None:
+        """Mark a task as completed."""
+        async with self._lock:
+            if task_id in self._active:
+                task = self._active.pop(task_id)
+                task.status = TaskStatus.COMPLETED if success else TaskStatus.FAILED
+                self._completed.append(task)
+                
+                if self._on_task_completed:
+                    self._on_task_completed(task)
+    
+    def get_queue_state(self) -> Dict[str, Any]:
+        """Get current queue state for UI."""
+        return {
+            "queued": [t.to_dict() for t in self._queue],
+            "active": [t.to_dict() for t in self._active.values()],
+            "completed": [t.to_dict() for t in self._completed[-10:]],  # Last 10
+            "counts": {
+                "queued": len(self._queue),
+                "active": len(self._active),
+                "completed": len(self._completed),
+            }
+        }
+    
+    @property
+    def is_empty(self) -> bool:
+        """Check if queue is empty."""
+        return len(self._queue) == 0 and len(self._active) == 0
+    
+    @property
+    def pending_count(self) -> int:
+        """Get number of pending tasks."""
+        return len(self._queue)
+    
+    @property
+    def active_count(self) -> int:
+        """Get number of active tasks."""
+        return len(self._active)

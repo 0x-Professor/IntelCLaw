@@ -147,6 +147,11 @@ class IntelCLawApp {
             // Messages
             messagesContainer: document.getElementById('messagesContainer'),
             emptyState: document.getElementById('emptyState'),
+            workflowPanel: document.getElementById('workflowPanel'),
+            workflowStatus: document.getElementById('workflowStatus'),
+            workflowNow: document.getElementById('workflowNow'),
+            workflowNext: document.getElementById('workflowNext'),
+            workflowSteps: document.getElementById('workflowSteps'),
             
             // Input
             messageInput: document.getElementById('messageInput'),
@@ -270,6 +275,7 @@ class IntelCLawApp {
         this.ws.on('tool_result', (data) => this._handleToolResult(data));
         this.ws.on('error', (data) => this._handleError(data));
         this.ws.on('state', (data) => this._handleState(data));
+        this.ws.on('workflow', (data) => this._handleWorkflow(data));
 
         // Connect
         this.ws.connect();
@@ -602,6 +608,163 @@ class IntelCLawApp {
         if (data.tasks) {
             this.elements.taskCount.textContent = data.tasks.length;
         }
+
+        if (data.workflow) {
+            this._renderWorkflow(data.workflow);
+        }
+    }
+
+    /**
+     * Handle workflow update from server
+     */
+    _handleWorkflow(data) {
+        if (data.workflow) {
+            this._renderWorkflow(data.workflow);
+        }
+    }
+
+    /**
+     * Render workflow plan, progress, and queue
+     */
+    _renderWorkflow(workflow) {
+        if (!this.elements.workflowPanel) return;
+
+        const plan = workflow.plan || [];
+        const completed = new Set(workflow.completed_steps || []);
+        const currentIndex = workflow.current_step || 0;
+        const progress = workflow.progress || 0;
+        const queue = workflow.queue || [];
+
+        // Status with color coding
+        if (this.elements.workflowStatus) {
+            const status = workflow.status || 'IDLE';
+            const statusText = status.toUpperCase();
+            this.elements.workflowStatus.textContent = statusText;
+            this.elements.workflowStatus.className = 'workflow-status status-' + status.toLowerCase();
+        }
+
+        // Progress bar
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        if (progressFill) {
+            progressFill.style.width = `${progress}%`;
+            // Color based on progress
+            if (progress >= 100) {
+                progressFill.classList.add('complete');
+            } else {
+                progressFill.classList.remove('complete');
+            }
+        }
+        if (progressText) {
+            progressText.textContent = `${Math.round(progress)}%`;
+        }
+
+        // Current step (use current_step_title if available)
+        const nowStep = workflow.current_step_title || plan[currentIndex] || '-';
+        const nextStep = workflow.next_step || plan[currentIndex + 1] || '-';
+        
+        if (this.elements.workflowNow) {
+            this.elements.workflowNow.textContent = nowStep;
+            // Add animation when step changes
+            this.elements.workflowNow.classList.remove('step-change');
+            void this.elements.workflowNow.offsetWidth; // Force reflow
+            this.elements.workflowNow.classList.add('step-change');
+        }
+        if (this.elements.workflowNext) {
+            this.elements.workflowNext.textContent = nextStep;
+        }
+
+        // Step count
+        const stepCount = document.getElementById('stepCount');
+        if (stepCount) {
+            stepCount.textContent = `${completed.size}/${plan.length}`;
+        }
+
+        // Steps list with icons
+        if (this.elements.workflowSteps) {
+            this.elements.workflowSteps.innerHTML = '';
+            plan.forEach((step, idx) => {
+                const li = document.createElement('li');
+                li.className = 'workflow-step';
+                
+                // Status icon
+                const icon = document.createElement('span');
+                icon.className = 'step-icon';
+                
+                if (completed.has(step)) {
+                    li.classList.add('done');
+                    icon.innerHTML = '✓';
+                    icon.classList.add('icon-done');
+                } else if (idx === currentIndex) {
+                    li.classList.add('active');
+                    icon.innerHTML = '●';
+                    icon.classList.add('icon-active', 'pulse');
+                } else {
+                    icon.innerHTML = String(idx + 1);
+                    icon.classList.add('icon-pending');
+                }
+                
+                const text = document.createElement('span');
+                text.className = 'step-text';
+                text.textContent = step;
+                
+                li.appendChild(icon);
+                li.appendChild(text);
+                this.elements.workflowSteps.appendChild(li);
+            });
+        }
+
+        // Task queue
+        const queuePanel = document.getElementById('workflowQueue');
+        const queueList = document.getElementById('queueList');
+        const queueCount = document.getElementById('queueCount');
+        
+        if (queuePanel && queue.length > 0) {
+            queuePanel.classList.remove('hidden');
+            if (queueCount) queueCount.textContent = queue.length;
+            
+            if (queueList) {
+                queueList.innerHTML = '';
+                queue.slice(0, 5).forEach((task, idx) => {
+                    const li = document.createElement('li');
+                    li.className = 'queue-item';
+                    if (idx === 0) li.classList.add('current');
+                    li.textContent = typeof task === 'string' ? task : task.goal || task.title || 'Task';
+                    queueList.appendChild(li);
+                });
+                if (queue.length > 5) {
+                    const li = document.createElement('li');
+                    li.className = 'queue-item more';
+                    li.textContent = `+${queue.length - 5} more...`;
+                    queueList.appendChild(li);
+                }
+            }
+        } else if (queuePanel) {
+            queuePanel.classList.add('hidden');
+        }
+
+        // Show/hide panel based on activity
+        if (this.elements.workflowPanel) {
+            const hasActivity = plan.length > 0 || workflow.status !== 'idle';
+            if (hasActivity) {
+                this.elements.workflowPanel.classList.remove('hidden');
+            } else {
+                // Keep visible briefly after completion
+                setTimeout(() => {
+                    if (!this._hasActiveWorkflow()) {
+                        this.elements.workflowPanel.classList.add('hidden');
+                    }
+                }, 3000);
+            }
+        }
+    }
+
+    /**
+     * Check if there's an active workflow
+     */
+    _hasActiveWorkflow() {
+        const status = this.elements.workflowStatus?.textContent?.toLowerCase();
+        return status && status !== 'idle' && status !== 'completed';
     }
 
     /**

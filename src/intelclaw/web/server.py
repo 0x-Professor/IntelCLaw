@@ -98,8 +98,71 @@ class WebServer:
             version="0.1.0"
         )
         self.manager = ConnectionManager()
+        self.workflow_state: Dict[str, Any] = {
+            "status": "idle",
+            "plan": [],
+            "current_step": 0,
+            "completed_steps": [],
+            "last_tool": None,
+            "last_tool_error": None,
+        }
         self._setup_routes()
+        self._setup_event_subscriptions()
         self._server = None
+
+    def _setup_event_subscriptions(self):
+        """Subscribe to agent events for real-time UI updates."""
+        if not self._app or not hasattr(self._app, "event_bus") or not self._app.event_bus:
+            return
+
+        async def handle_workflow(event):
+            self.workflow_state.update(event.data or {})
+            await self.manager.broadcast({
+                "type": "workflow",
+                "workflow": self.workflow_state,
+            })
+
+        async def handle_plan(event):
+            self.workflow_state.update(event.data or {})
+            await self.manager.broadcast({
+                "type": "workflow",
+                "workflow": self.workflow_state,
+            })
+
+        async def handle_tool_call(event):
+            await self.manager.broadcast({
+                "type": "tool_call",
+                **event.data,
+            })
+
+        async def handle_tool_result(event):
+            await self.manager.broadcast({
+                "type": "tool_result",
+                **event.data,
+            })
+
+        async def handle_status(event):
+            self.workflow_state["status"] = event.data.get("status", self.workflow_state.get("status", "idle"))
+            await self.manager.broadcast({
+                "type": "workflow",
+                "workflow": self.workflow_state,
+            })
+
+        # Subscribe with default priority
+        def _schedule(coro):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(coro)
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+                loop.create_task(coro)
+
+        _schedule(self._app.event_bus.subscribe("agent.workflow", handle_workflow))
+        _schedule(self._app.event_bus.subscribe("agent.plan", handle_plan))
+        _schedule(self._app.event_bus.subscribe("agent.plan.update", handle_plan))
+        _schedule(self._app.event_bus.subscribe("tool.call", handle_tool_call))
+        _schedule(self._app.event_bus.subscribe("tool.result", handle_tool_result))
+        _schedule(self._app.event_bus.subscribe("agent.status", handle_status))
     
     def _setup_routes(self):
         """Set up FastAPI routes."""
@@ -338,11 +401,19 @@ class WebServer:
             await self.manager.connect(websocket)
             current_session_id = None
             
+            # Refresh workflow state from agent if available
+            if self._app and self._app.agent and hasattr(self._app.agent, "get_workflow_state"):
+                try:
+                    self.workflow_state.update(self._app.agent.get_workflow_state())
+                except Exception:
+                    pass
+            
             # Send initial state
             await self.manager.send_message({
                 "type": "state",
                 "model": self.current_model,
                 "tasks": [],
+                "workflow": self.workflow_state,
                 "timestamp": datetime.now().isoformat()
             }, websocket)
             
@@ -398,10 +469,16 @@ class WebServer:
                         logger.info(f"New session: {current_session_id}")
                     
                     elif msg_type == "get_state":
+                        if self._app and self._app.agent and hasattr(self._app.agent, "get_workflow_state"):
+                            try:
+                                self.workflow_state.update(self._app.agent.get_workflow_state())
+                            except Exception:
+                                pass
                         await self.manager.send_message({
                             "type": "state",
                             "model": self.current_model,
                             "tasks": [],
+                            "workflow": self.workflow_state,
                             "timestamp": datetime.now().isoformat()
                         }, websocket)
                         

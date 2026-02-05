@@ -124,6 +124,62 @@
             
             <!-- Chat Area -->
             <div class="chat-area" id="chatView">
+                <!-- Workflow Panel -->
+                <div class="workflow-panel hidden" id="workflowPanel">
+                    <div class="workflow-header">
+                        <div class="workflow-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                <circle cx="12" cy="12" r="10"/>
+                                <polyline points="12,6 12,12 16,14"/>
+                            </svg>
+                            <span>Task Execution</span>
+                        </div>
+                        <div class="workflow-status" id="workflowStatus">IDLE</div>
+                    </div>
+                    
+                    <!-- Progress Bar -->
+                    <div class="workflow-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                        </div>
+                        <span class="progress-text" id="progressText">0%</span>
+                    </div>
+                    
+                    <div class="workflow-body">
+                        <!-- Current/Next Step -->
+                        <div class="workflow-current">
+                            <div class="workflow-row now">
+                                <span class="workflow-label">
+                                    <span class="pulse-dot"></span> Now
+                                </span>
+                                <span class="workflow-value" id="workflowNow">-</span>
+                            </div>
+                            <div class="workflow-row next">
+                                <span class="workflow-label">Next</span>
+                                <span class="workflow-value" id="workflowNext">-</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Steps List -->
+                        <div class="workflow-steps-container">
+                            <div class="steps-header">
+                                <span>Plan Steps</span>
+                                <span class="step-count" id="stepCount">0/0</span>
+                            </div>
+                            <ol class="workflow-steps" id="workflowSteps"></ol>
+                        </div>
+                        
+                        <!-- Task Queue (if multiple tasks) -->
+                        <div class="workflow-queue hidden" id="workflowQueue">
+                            <div class="queue-header">
+                                <span>Task Queue</span>
+                                <span class="queue-count" id="queueCount">0</span>
+                            </div>
+                            <ul class="queue-list" id="queueList"></ul>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="messages" id="messagesContainer">
                     <!-- Empty state shown by default -->
                     <div class="empty-state" id="emptyState">
