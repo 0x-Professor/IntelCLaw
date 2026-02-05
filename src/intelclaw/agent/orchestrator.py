@@ -169,7 +169,7 @@ class AgentOrchestrator(BaseAgent):
         
         self._llm_provider = LLMProvider({
             "model": model_config.get("primary", self.MODEL_NAME),
-            "temperature": 0.1,
+            "temperature": 1.0,
             "provider": llm_config.get("provider", "auto"),
         })
         await self._llm_provider.initialize()
