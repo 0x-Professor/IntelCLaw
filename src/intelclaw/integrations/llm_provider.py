@@ -902,7 +902,9 @@ class CopilotLLM:
             if response.get("tool_calls"):
                 # Set tool_calls attribute for LangGraph compatibility
                 ai_message.tool_calls = response["tool_calls"]
-                logger.debug(f"AIMessage created with {len(response['tool_calls'])} tool calls")
+                logger.info(f"AIMessage created with {len(response['tool_calls'])} tool calls: {[tc['name'] for tc in response['tool_calls']]}")
+            else:
+                logger.info(f"AIMessage has no tool_calls (content length: {len(content)})")
             
             return ai_message
             
@@ -1005,7 +1007,11 @@ class CopilotLLM:
         # Add tools if bound and requested
         if include_tools and hasattr(self, '_tools_schema') and self._tools_schema:
             payload["tools"] = self._tools_schema
-            payload["tool_choice"] = "auto"
+            # Use stored tool_choice (defaults to 'auto', can be 'required')
+            tool_choice = getattr(self, '_tool_choice', 'auto') or 'auto'
+            payload["tool_choice"] = tool_choice
+            if tool_choice != 'auto':
+                logger.info(f"Tool choice set to: {tool_choice}")
         
         logger.debug(f"Calling Copilot API ({self._copilot_base_url}) with model: {self.model}")
         if include_tools and hasattr(self, '_tools_schema'):
@@ -1094,7 +1100,8 @@ class CopilotLLM:
         # Add tools if bound and requested
         if include_tools and hasattr(self, '_tools_schema') and self._tools_schema:
             payload["tools"] = self._tools_schema
-            payload["tool_choice"] = "auto"
+            tool_choice = getattr(self, '_tool_choice', 'auto') or 'auto'
+            payload["tool_choice"] = tool_choice
         
         logger.debug(f"Calling GitHub Models API with model: {self._github_model_id}")
         if include_tools and hasattr(self, '_tools_schema'):
@@ -1184,10 +1191,17 @@ class CopilotLLM:
         # Response is now an AIMessage
         yield response.content if hasattr(response, 'content') else str(response)
     
-    def bind_tools(self, tools: List[Any]) -> "CopilotLLM":
-        """Bind tools for function calling - returns self for LangGraph compatibility."""
+    def bind_tools(self, tools: List[Any], tool_choice: str = "auto") -> "CopilotLLM":
+        """Bind tools for function calling - returns self for LangGraph compatibility.
+        
+        Args:
+            tools: List of tools to bind
+            tool_choice: Tool calling mode - 'auto', 'required', or 'none'
+        """
         # Store tools for use in API calls
         self._bound_tools = tools
+        # Store tool_choice preference
+        self._tool_choice = tool_choice
         # Convert LangChain tools to OpenAI function format
         self._tools_schema = self._convert_tools_to_schema(tools)
         # Return self for chaining

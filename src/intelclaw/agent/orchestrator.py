@@ -1055,7 +1055,21 @@ class AgentOrchestrator(BaseAgent):
         
         # Get LLM response with tool binding
         if self._langchain_tools:
-            llm_with_tools = self._llm.bind_tools(self._langchain_tools)
+            # On the first iteration, if the query clearly requires tool use,
+            # force the LLM to call a tool instead of responding with text
+            tool_choice = "auto"
+            if state["iteration"] == 0:
+                # Extract user message from state
+                user_msg = ""
+                for msg in reversed(state["messages"]):
+                    if hasattr(msg, 'content') and isinstance(msg, HumanMessage):
+                        user_msg = msg.content
+                        break
+                if user_msg and self._requires_tool_use(user_msg):
+                    tool_choice = "required"
+                    logger.info(f"Forcing tool_choice='required' for tool-required query: {user_msg[:80]}")
+            
+            llm_with_tools = self._llm.bind_tools(self._langchain_tools, tool_choice=tool_choice)
             response = await llm_with_tools.ainvoke(messages)
         else:
             response = await self._llm.ainvoke(messages)
