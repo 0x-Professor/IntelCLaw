@@ -20,6 +20,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
+from langchain_core.messages import HumanMessage
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -235,17 +236,37 @@ Your job is to break down user requests into clear, actionable steps.
 For each step, determine:
 1. A clear, concise title (what to do)
 2. A detailed description (how to do it)
-3. The tool to use (if any)
+3. The EXACT tool name to use (from the available tools list - use EXACTLY as shown)
 4. Dependencies on other steps
 
-Available tools: {tools}
+AVAILABLE TOOLS (use these EXACT names):
+{tools}
+
+IMPORTANT TOOL MAPPING:
+- For web search: use "tavily_search" with args {{"query": "search terms"}}
+- For reading files: use "file_read" with args {{"path": "file/path"}}
+- For writing files: use "file_write" with args {{"path": "file/path", "content": "..."}}
+- For deleting files: use "file_delete" with args {{"path": "file/path"}}
+- For copying files: use "file_copy" with args {{"source": "src/path", "destination": "dst/path"}}
+- For moving/renaming files: use "file_move" with args {{"source": "old/path", "destination": "new/path"}}
+- For finding files: use "file_search" with args {{"directory": ".", "pattern": "*.txt"}}
+- For listing directories: use "list_directory" with args {{"path": "."}}
+- For current directory: use "get_cwd"
+- For running commands: use "shell_command" with args {{"command": "..."}}
+- For PowerShell: use "powershell" with args {{"command": "..."}}
+- For web scraping: use "web_scrape" with args {{"url": "..."}}
+- For taking screenshot: use "screenshot"
+- For clipboard: use "clipboard" with args {{"action": "read"}} or {{"action": "write", "content": "..."}}
+- For launching apps: use "launch_app" with args {{"target": "app_name"}}
+- For system info: use "system_info"
 
 Guidelines:
 - Each step should be atomic and achievable
 - Identify which steps can run in parallel (no dependencies between them)
-- Add information gathering steps (web search, RAG) when needed
+- Use tavily_search for web research, not "web_search"
 - Include verification/validation steps for important operations
 - Maximum {max_steps} steps per plan
+- For analysis/synthesis steps without a specific tool, set tool to null
 
 Return ONLY a JSON array with this structure:
 [
@@ -253,7 +274,7 @@ Return ONLY a JSON array with this structure:
     "id": "step_1",
     "title": "Short action title",
     "description": "Detailed description of what to do",
-    "tool": "tool_name_or_null",
+    "tool": "exact_tool_name_or_null",
     "tool_args": {{"arg": "value"}} or null,
     "dependencies": ["step_id"] or [],
     "requires_info": true/false
@@ -499,13 +520,17 @@ Return a JSON object:
         
         from langchain_core.messages import SystemMessage, HumanMessage
         
-        # Get available tools
-        tool_names = []
+        # Get available tools with descriptions
+        tool_info = []
         if self.tools:
             try:
-                tool_names = list(self.tools.get_all().keys())
-            except Exception:
-                pass
+                tool_defs = self.tools.list_tools()
+                for td in tool_defs[:20]:  # Limit to 20 tools
+                    tool_info.append(f"- {td.name}: {td.description[:100]}")
+            except Exception as e:
+                logger.debug(f"Failed to get tools: {e}")
+        
+        tools_str = "\n".join(tool_info) if tool_info else "No tools available"
         
         # Build context string
         context_str = ""
@@ -522,7 +547,7 @@ Return a JSON object:
                 context_str += item.get("context", "")[:500] + "\n"
         
         system_prompt = self.PLANNING_SYSTEM_PROMPT.format(
-            tools=", ".join(tool_names[:20]) if tool_names else "None available",
+            tools=tools_str,
             max_steps=self.max_steps,
         )
         
@@ -656,15 +681,34 @@ Return a JSON object:
         
         try:
             if executor:
+                # Use custom executor
                 result = await executor(step) if asyncio.iscoroutinefunction(executor) else executor(step)
                 step.result = str(result) if result else "Completed"
             elif step.tool and self.tools:
-                result = await self.tools.execute(step.tool, step.tool_args or {})
+                # Execute the specified tool
+                logger.info(f"Executing tool {step.tool} for step: {step.title}")
+                
+                # Special handling for file_write - populate content from previous steps
+                tool_args = dict(step.tool_args) if step.tool_args else {}
+                if step.tool == "file_write":
+                    content = tool_args.get("content", "")
+                    # If content is a placeholder or too short, synthesize from completed steps
+                    if not content or len(content) < 50 or "will be generated" in content.lower() or "..." in content:
+                        logger.info("File write content is placeholder, synthesizing from completed steps...")
+                        synthesized_content = await self._synthesize_content_for_file(plan, step)
+                        if synthesized_content:
+                            tool_args["content"] = synthesized_content
+                
+                result = await self.tools.execute(step.tool, tool_args)
                 step.result = str(result) if result else "Completed"
             else:
-                step.result = "Step requires manual execution or no executor provided"
+                # No specific tool - use LLM to reason and execute
+                logger.info(f"Using LLM to execute step: {step.title}")
+                result = await self._llm_execute_step(step, plan)
+                step.result = str(result) if result else "Completed"
             
             step.status = TaskStatus.COMPLETED
+            logger.info(f"Step completed: {step.title} - {step.result[:100] if step.result else 'done'}")
             
         except Exception as e:
             step.error = str(e)
@@ -672,7 +716,7 @@ Return a JSON object:
             
             if step.retries < step.max_retries:
                 step.status = TaskStatus.PENDING  # Will retry
-                logger.warning(f"Step {step.id} failed, will retry ({step.retries}/{step.max_retries})")
+                logger.warning(f"Step {step.id} failed, will retry ({step.retries}/{step.max_retries}): {e}")
             else:
                 step.status = TaskStatus.FAILED
                 logger.error(f"Step {step.id} failed permanently: {e}")
@@ -681,6 +725,204 @@ Return a JSON object:
         
         if self._on_step_completed:
             self._on_step_completed(step)
+    
+    async def _llm_execute_step(self, step: TaskStep, plan: TaskPlan) -> str:
+        """
+        Execute a step using the LLM when no specific tool is assigned.
+        
+        This method allows the LLM to reason about the step and either:
+        1. Use available tools to complete it
+        2. Generate content/analysis directly
+        
+        Args:
+            step: The step to execute
+            plan: The parent plan for context
+            
+        Returns:
+            Result of the step execution
+        """
+        if not self.llm_provider or not self.llm_provider.llm:
+            return "LLM not available for step execution"
+        
+        llm = self.llm_provider.llm
+        
+        # Build context from completed steps - include full results for synthesis
+        completed_context = []
+        full_results = {}  # Store full results for file writing
+        for s in plan.completed_steps:
+            # For synthesis/write steps, provide more context
+            if step.title.lower().find("write") >= 0 or step.title.lower().find("save") >= 0 or step.title.lower().find("synthesize") >= 0 or step.title.lower().find("analyze") >= 0:
+                # Include full result for write/synthesis steps
+                completed_context.append(f"- {s.title}:\n{s.result if s.result else 'done'}")
+                full_results[s.id] = s.result
+            else:
+                # Summarize for other steps
+                result_preview = s.result[:500] if s.result else 'done'
+                completed_context.append(f"- {s.title}: {result_preview}{'...' if s.result and len(s.result) > 500 else ''}")
+        
+        # Get available tools
+        available_tools = []
+        if self.tools:
+            try:
+                tool_list = self.tools.list_tools()
+                available_tools = [t.name for t in tool_list[:20]]  # Limit to 20 tools
+            except Exception:
+                pass
+        
+        # Extract step number from ID (e.g., "step_1" -> 1)
+        step_order = step.id.split("_")[-1] if "_" in step.id else step.id
+        
+        # Determine if this is a file writing step
+        is_write_step = any(kw in step.title.lower() for kw in ["save", "write", "create file", "output"])
+        
+        # Build the file writing instruction if applicable
+        file_write_instruction = ""
+        if is_write_step:
+            file_write_instruction = """
+IMPORTANT: This is a FILE WRITING step. You MUST:
+1. Use the file_write tool with the FULL synthesized content
+2. Include ALL the information from the completed steps above
+3. Format the content as proper markdown
+4. Use: TOOL: file_write ARGS: {"path": "filename.md", "content": "...full content here..."}
+"""
+        
+        prompt = f"""You are executing step {step_order} of a multi-step plan.
+
+GOAL: {plan.goal}
+
+CURRENT STEP: {step.title}
+STEP DESCRIPTION: {step.description or step.title}
+{file_write_instruction}
+{"COMPLETED STEPS WITH RESULTS:" + chr(10) + chr(10).join(completed_context) if completed_context else "This is the first step."}
+
+{"AVAILABLE TOOLS: " + ", ".join(available_tools) if available_tools else "No tools available - provide analysis/content directly."}
+
+Execute this step by:
+1. If a tool is needed, specify which tool and arguments to use
+2. If this is an analysis/synthesis step, provide the result directly
+3. Be specific and actionable in your response
+4. For file writing, use the file_write tool with the COMPLETE content
+
+Respond with either:
+- TOOL: <tool_name> ARGS: <json_args>
+- RESULT: <direct result of the step>
+"""
+
+        try:
+            response = await llm.ainvoke([HumanMessage(content=prompt)])
+            content = response.content if hasattr(response, 'content') else str(response)
+            
+            # Check if LLM wants to use a tool
+            if content.strip().startswith("TOOL:"):
+                # Parse tool call - handle multiline content
+                try:
+                    # Find the tool name first
+                    content_stripped = content.strip()
+                    tool_line_end = content_stripped.find("\n")
+                    first_line = content_stripped[:tool_line_end] if tool_line_end > 0 else content_stripped
+                    tool_part = first_line.split("TOOL:")[1].strip()
+                    
+                    if "ARGS:" in content_stripped:
+                        # Extract tool name (before ARGS)
+                        tool_name = tool_part.split("ARGS:")[0].strip() if "ARGS:" in tool_part else tool_part.strip()
+                        
+                        # Extract JSON args - may be multiline
+                        args_start = content_stripped.find("ARGS:") + 5
+                        args_str = content_stripped[args_start:].strip()
+                        
+                        # Try to find valid JSON - could be on same line or span multiple lines
+                        try:
+                            args = json.loads(args_str)
+                        except json.JSONDecodeError:
+                            # Try to extract JSON object/array from the string
+                            import re
+                            json_match = re.search(r'(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\])', args_str, re.DOTALL)
+                            if json_match:
+                                args = json.loads(json_match.group(1))
+                            else:
+                                args = {}
+                    else:
+                        tool_name = tool_part.strip()
+                        args = {}
+                    
+                    # Execute the tool
+                    logger.info(f"Executing tool {tool_name} with args: {str(args)[:200]}...")
+                    if self.tools:
+                        result = await self.tools.execute(tool_name, args)
+                        return str(result) if result else f"Tool {tool_name} executed"
+                    else:
+                        return f"Tool {tool_name} requested but no tool registry available"
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to parse tool call: {e}")
+                    # Fall back to using the response as-is
+                    return content
+            
+            elif content.strip().startswith("RESULT:"):
+                return content.split("RESULT:", 1)[1].strip()
+            
+            else:
+                # Use the response as the result
+                return content
+                
+        except Exception as e:
+            logger.error(f"LLM execution failed for step {step.title}: {e}")
+            raise
+    
+    async def _synthesize_content_for_file(self, plan: TaskPlan, step: TaskStep) -> Optional[str]:
+        """
+        Synthesize file content from completed step results using the LLM.
+        
+        Args:
+            plan: The task plan with completed steps
+            step: The file write step
+            
+        Returns:
+            Synthesized content for the file
+        """
+        if not self.llm_provider or not self.llm_provider.llm:
+            return None
+        
+        llm = self.llm_provider.llm
+        
+        # Gather all completed step results
+        step_results = []
+        for s in plan.completed_steps:
+            if s.result:
+                step_results.append(f"## {s.title}\n\n{s.result}")
+        
+        if not step_results:
+            return None
+        
+        # Get file path for context
+        file_path = step.tool_args.get("path", "output.md") if step.tool_args else "output.md"
+        
+        prompt = f"""Based on the research and analysis completed, create a well-formatted document for saving.
+
+ORIGINAL GOAL: {plan.goal}
+
+STEP BEING EXECUTED: {step.title}
+TARGET FILE: {file_path}
+
+RESEARCH RESULTS TO INCLUDE:
+{chr(10).join(step_results)}
+
+Create a comprehensive, well-structured markdown document that:
+1. Has a clear title and introduction
+2. Organizes the findings into logical sections
+3. Includes all key insights from the research
+4. Has a conclusion or summary
+
+Return ONLY the document content (no code blocks, no explanations, just the markdown content):"""
+
+        try:
+            response = await llm.ainvoke([HumanMessage(content=prompt)])
+            content = response.content if hasattr(response, 'content') else str(response)
+            return content.strip()
+        except Exception as e:
+            logger.error(f"Failed to synthesize file content: {e}")
+            # Fallback: just concatenate the results
+            return f"# {plan.goal}\n\n" + "\n\n".join(step_results)
     
     async def replan(
         self,

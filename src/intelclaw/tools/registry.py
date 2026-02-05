@@ -255,7 +255,8 @@ class ToolRegistry:
         from intelclaw.tools.builtin.search import TavilySearchTool
         from intelclaw.tools.builtin.file_ops import (
             FileReadTool, FileWriteTool, FileSearchTool,
-            DirectoryListTool, GetCurrentDirectoryTool
+            DirectoryListTool, GetCurrentDirectoryTool,
+            FileDeleteTool, FileCopyTool, FileMoveTool
         )
         from intelclaw.tools.builtin.system import ScreenshotTool, ClipboardTool, LaunchAppTool
         from intelclaw.tools.builtin.web import WebScrapeTool
@@ -270,6 +271,9 @@ class ToolRegistry:
             # File operation tools
             FileReadTool(),
             FileWriteTool(),
+            FileDeleteTool(),
+            FileCopyTool(),
+            FileMoveTool(),
             FileSearchTool(),
             DirectoryListTool(),
             GetCurrentDirectoryTool(),

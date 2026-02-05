@@ -1033,13 +1033,46 @@ class AgentOrchestrator(BaseAgent):
                 sections.append("\n")
         
         # Tool usage guidance (minimal - let TOOLS.md handle details)
-        sections.append("""## Tool Usage
-You MUST use tools when the user asks you to perform actions.
+        # Include available tools list for better tool calling
+        available_tool_names = []
+        if self.tools:
+            try:
+                tool_defs = self.tools.list_tools()
+                available_tool_names = [t.name for t in tool_defs]
+            except Exception:
+                pass
+        
+        tool_list_str = ", ".join(available_tool_names) if available_tool_names else "various tools"
+        
+        sections.append(f"""## Tool Usage
+You MUST use tools when the user asks you to perform actions. DO NOT just explain what you would do - actually DO IT by calling the appropriate tool.
+
+AVAILABLE TOOLS: {tool_list_str}
+
+KEY TOOL MAPPINGS:
+- To DELETE a file: use "file_delete" with {{"path": "filename"}}
+- To CREATE/WRITE a file: use "file_write" with {{"path": "filename", "content": "..."}}
+- To READ a file: use "file_read" with {{"path": "filename"}}
+- To SEARCH for files: use "file_search" with {{"directory": ".", "pattern": "*.md"}}
+- To LIST directory: use "list_directory" with {{"path": "."}}
+- To MOVE/RENAME: use "file_move" with {{"source": "old", "destination": "new"}}
+- To COPY: use "file_copy" with {{"source": "src", "destination": "dst"}}
+- To WEB SEARCH: use "tavily_search" with {{"query": "search terms"}}
+- To RUN COMMAND: use "shell_command" with {{"command": "..."}}
+- To SCRAPE WEBSITE: use "web_scrape" with {{"url": "..."}}
+- To GET CURRENT DIRECTORY: use "get_cwd"
+
+IMPORTANT RULES:
+1. When user says "delete file X" -> immediately call file_delete
+2. When user says "find file X" -> immediately call file_search or list_directory
+3. NEVER say "I will delete" without actually calling the tool
+4. NEVER claim you completed an action unless a tool result confirms it
+5. If a tool fails, report the actual error message
+
 Think step by step before taking action.
 Be security-conscious - ask for confirmation for sensitive operations.
 If an execution plan is present, follow it step-by-step and use tools to complete each step.
 If a step fails repeatedly, consider replanning or ask the user for clarification.
-Never claim you completed an action unless a tool result confirms it.
 Focus only on the current plan step unless the user changes the goal.
 """)
         
@@ -1229,23 +1262,19 @@ Focus only on the current plan step unless the user changes the goal.
                 logger.warning("TaskPlanner failed to create a plan, falling back to REACT")
                 return await self._process_with_react(context, start_time)
             
-            # Step 2: Add plan to queue if using task queue
-            if self._task_queue:
-                self._task_queue.add_task(plan)
-            
-            # Step 3: Execute the plan
+            # Step 2: Execute the plan
             await self._update_workflow_state(
                 status=AgentStatus.EXECUTING.value,
                 current_step_title=plan.steps[0].title if plan.steps else "Executing...",
             )
             
-            result = await self._task_planner.execute_plan(plan)
+            executed_plan = await self._task_planner.execute_plan(plan)
             
-            # Step 4: Build response from execution results
+            # Step 3: Build response from execution results
             thoughts = []
             tools_used = []
             
-            for i, step in enumerate(plan.steps):
+            for i, step in enumerate(executed_plan.steps):
                 thought = AgentThought(
                     step=i + 1,
                     thought=f"{step.title}: {step.result or step.error or 'completed'}",
@@ -1257,20 +1286,28 @@ Focus only on the current plan step unless the user changes the goal.
                     tools_used.append(step.tool)
             
             # Build the final answer
-            if plan.is_complete:
+            if executed_plan.is_complete:
                 # Synthesize a final answer from the results
-                answer = await self._synthesize_plan_response(plan, context.user_message)
+                answer = await self._synthesize_plan_response(executed_plan, context.user_message)
             else:
                 # Plan partially completed or failed
-                completed = [s.title for s in plan.completed_steps]
-                failed = [f"{s.title}: {s.error}" for s in plan.failed_steps]
+                completed = [s.title for s in executed_plan.completed_steps]
+                failed = [f"{s.title}: {s.error}" for s in executed_plan.failed_steps]
                 
-                answer = f"I completed {len(completed)} of {len(plan.steps)} steps.\n\n"
+                answer = f"I completed {len(completed)} of {len(executed_plan.steps)} steps.\n\n"
                 if completed:
                     answer += "✓ Completed:\n" + "\n".join(f"  - {c}" for c in completed) + "\n\n"
                 if failed:
                     answer += "✗ Failed:\n" + "\n".join(f"  - {f}" for f in failed) + "\n\n"
-                answer += f"Final result: {result}"
+                
+                # Add last step result as context
+                last_result = None
+                for s in reversed(executed_plan.steps):
+                    if s.result:
+                        last_result = s.result
+                        break
+                if last_result:
+                    answer += f"Last result: {last_result[:500]}"
             
             latency = (time.time() - start_time) * 1000
             
@@ -1285,7 +1322,7 @@ Focus only on the current plan step unless the user changes the goal.
             self.status = AgentStatus.IDLE
             await self._update_workflow_state(
                 status=self.status.value,
-                progress=100 if plan.is_complete else plan.progress_percent,
+                progress=100 if executed_plan.is_complete else executed_plan.progress_percent,
             )
             
             return AgentResponse(

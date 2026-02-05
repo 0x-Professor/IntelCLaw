@@ -225,6 +225,242 @@ class FileWriteTool(BaseTool):
             return ToolResult(success=False, error=f"Failed to write file: {str(e)}")
 
 
+class FileDeleteTool(BaseTool):
+    """Delete a file or directory."""
+    
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="file_delete",
+            description="Delete a file or directory. Can delete files or entire directories (with force option). Use with caution!",
+            category=ToolCategory.SYSTEM,
+            permissions=[ToolPermission.WRITE],
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the file or directory to delete"
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Force delete directories with contents (default: False)",
+                        "default": False
+                    }
+                },
+                "required": ["path"]
+            },
+            returns="boolean",
+            requires_confirmation=True
+        )
+    
+    async def execute(
+        self,
+        path: str,
+        force: bool = False,
+        **kwargs
+    ) -> ToolResult:
+        """Delete file or directory."""
+        try:
+            path = path.strip().strip('"').strip("'")
+            target_path = Path(path).expanduser().resolve()
+            
+            if not target_path.exists():
+                # Try relative path
+                alt_path = Path.cwd() / path
+                if alt_path.exists():
+                    target_path = alt_path
+                else:
+                    return ToolResult(
+                        success=False, 
+                        error=f"Path not found: {path}"
+                    )
+            
+            if target_path.is_file():
+                await asyncio.to_thread(target_path.unlink)
+                return ToolResult(
+                    success=True,
+                    data=True,
+                    metadata={"path": str(target_path), "type": "file", "deleted": True}
+                )
+            elif target_path.is_dir():
+                if force:
+                    await asyncio.to_thread(shutil.rmtree, target_path)
+                else:
+                    await asyncio.to_thread(target_path.rmdir)  # Only works if empty
+                return ToolResult(
+                    success=True,
+                    data=True,
+                    metadata={"path": str(target_path), "type": "directory", "deleted": True}
+                )
+            else:
+                return ToolResult(success=False, error=f"Unknown path type: {path}")
+                
+        except PermissionError:
+            return ToolResult(success=False, error=f"Permission denied: Cannot delete {path}")
+        except OSError as e:
+            if "not empty" in str(e).lower():
+                return ToolResult(success=False, error=f"Directory not empty. Use force=True to delete: {path}")
+            return ToolResult(success=False, error=f"Failed to delete: {str(e)}")
+        except Exception as e:
+            logger.error(f"File delete failed: {e}")
+            return ToolResult(success=False, error=f"Failed to delete: {str(e)}")
+
+
+class FileCopyTool(BaseTool):
+    """Copy a file or directory."""
+    
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="file_copy",
+            description="Copy a file or directory to a new location. Creates destination directories automatically.",
+            category=ToolCategory.SYSTEM,
+            permissions=[ToolPermission.READ, ToolPermission.WRITE],
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Source file or directory path"
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "Destination path"
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "Overwrite if destination exists (default: False)",
+                        "default": False
+                    }
+                },
+                "required": ["source", "destination"]
+            },
+            returns="boolean"
+        )
+    
+    async def execute(
+        self,
+        source: str,
+        destination: str,
+        overwrite: bool = False,
+        **kwargs
+    ) -> ToolResult:
+        """Copy file or directory."""
+        try:
+            source = source.strip().strip('"').strip("'")
+            destination = destination.strip().strip('"').strip("'")
+            src_path = Path(source).expanduser().resolve()
+            dst_path = Path(destination).expanduser().resolve()
+            
+            if not src_path.exists():
+                return ToolResult(success=False, error=f"Source not found: {source}")
+            
+            if dst_path.exists() and not overwrite:
+                return ToolResult(success=False, error=f"Destination exists: {destination}. Use overwrite=True")
+            
+            # Create parent directories
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            if src_path.is_file():
+                await asyncio.to_thread(shutil.copy2, src_path, dst_path)
+            else:
+                if dst_path.exists() and overwrite:
+                    await asyncio.to_thread(shutil.rmtree, dst_path)
+                await asyncio.to_thread(shutil.copytree, src_path, dst_path)
+            
+            return ToolResult(
+                success=True,
+                data=True,
+                metadata={
+                    "source": str(src_path),
+                    "destination": str(dst_path),
+                    "type": "file" if src_path.is_file() else "directory"
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"File copy failed: {e}")
+            return ToolResult(success=False, error=f"Failed to copy: {str(e)}")
+
+
+class FileMoveTool(BaseTool):
+    """Move or rename a file or directory."""
+    
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="file_move",
+            description="Move or rename a file or directory. Use this to rename files or move them to a new location.",
+            category=ToolCategory.SYSTEM,
+            permissions=[ToolPermission.READ, ToolPermission.WRITE],
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Source file or directory path"
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "Destination path (new name or location)"
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "Overwrite if destination exists (default: False)",
+                        "default": False
+                    }
+                },
+                "required": ["source", "destination"]
+            },
+            returns="boolean"
+        )
+    
+    async def execute(
+        self,
+        source: str,
+        destination: str,
+        overwrite: bool = False,
+        **kwargs
+    ) -> ToolResult:
+        """Move or rename file/directory."""
+        try:
+            source = source.strip().strip('"').strip("'")
+            destination = destination.strip().strip('"').strip("'")
+            src_path = Path(source).expanduser().resolve()
+            dst_path = Path(destination).expanduser().resolve()
+            
+            if not src_path.exists():
+                return ToolResult(success=False, error=f"Source not found: {source}")
+            
+            if dst_path.exists():
+                if not overwrite:
+                    return ToolResult(success=False, error=f"Destination exists: {destination}. Use overwrite=True")
+                if dst_path.is_dir():
+                    await asyncio.to_thread(shutil.rmtree, dst_path)
+                else:
+                    await asyncio.to_thread(dst_path.unlink)
+            
+            # Create parent directories
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            await asyncio.to_thread(shutil.move, str(src_path), str(dst_path))
+            
+            return ToolResult(
+                success=True,
+                data=True,
+                metadata={
+                    "source": str(src_path),
+                    "destination": str(dst_path),
+                    "type": "file" if dst_path.is_file() else "directory"
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"File move failed: {e}")
+            return ToolResult(success=False, error=f"Failed to move: {str(e)}")
+
+
 class FileSearchTool(BaseTool):
     """Search for files by pattern."""
     
