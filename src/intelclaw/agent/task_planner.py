@@ -95,7 +95,7 @@ class TaskStep:
             "tool": self.tool,
             "tool_args": self.tool_args,
             "dependencies": self.dependencies,
-            "result": self.result[:500] if self.result else None,
+            "result": self.result if self.result else None,
             "error": self.error,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
@@ -306,6 +306,9 @@ Return a JSON object:
         max_steps: int = 10,
         enable_web_search: bool = True,
         enable_rag: bool = True,
+        step_timeout_secs: int = 120,
+        plan_timeout_secs: int = 900,
+        stall_timeout_secs: int = 180,
     ):
         self.llm_provider = llm_provider
         self.tools = tools
@@ -313,6 +316,10 @@ Return a JSON object:
         self.max_steps = max_steps
         self.enable_web_search = enable_web_search
         self.enable_rag = enable_rag
+        self.step_timeout_secs = step_timeout_secs
+        self.plan_timeout_secs = plan_timeout_secs
+        self.stall_timeout_secs = stall_timeout_secs
+        self._last_progress_ts = time.time()
         
         # Active plans
         self._plans: Dict[str, TaskPlan] = {}
@@ -474,8 +481,9 @@ Return a JSON object:
                     "tavily_search",
                     {"query": query, "max_results": 3}
                 )
-                if search_result:
-                    results.extend(search_result if isinstance(search_result, list) else [search_result])
+                payload = self._unwrap_tool_data(search_result)
+                if payload:
+                    results.extend(payload if isinstance(payload, list) else [payload])
             except Exception as e:
                 logger.debug(f"Web search failed for '{query}': {e}")
         
@@ -628,32 +636,56 @@ Return a JSON object:
             The completed plan with results
         """
         plan.status = TaskStatus.IN_PROGRESS
-        
-        while not plan.is_complete and not plan.has_failed:
-            runnable = plan.get_runnable_steps()
-            
-            if not runnable:
-                # No more steps can run - either done or blocked
-                if plan.pending_steps:
-                    # Steps are blocked
+        plan_start = time.time()
+        self._last_progress_ts = plan_start
+
+        try:
+            while not plan.is_complete and not plan.has_failed:
+                # Plan timeout guard
+                if self.plan_timeout_secs and (time.time() - plan_start) > self.plan_timeout_secs:
                     for step in plan.pending_steps:
-                        step.status = TaskStatus.BLOCKED
-                break
+                        step.status = TaskStatus.FAILED
+                        step.error = f"Plan timed out after {self.plan_timeout_secs} seconds"
+                    plan.status = TaskStatus.FAILED
+                    break
+
+                # Stall timeout guard (no progress)
+                if self.stall_timeout_secs and (time.time() - self._last_progress_ts) > self.stall_timeout_secs:
+                    for step in plan.pending_steps:
+                        step.status = TaskStatus.FAILED
+                        step.error = f"Plan stalled after {self.stall_timeout_secs} seconds without progress"
+                    plan.status = TaskStatus.FAILED
+                    break
+
+                runnable = plan.get_runnable_steps()
             
-            if parallel and len(runnable) > 1:
-                # Execute in parallel
-                await asyncio.gather(*[
-                    self._execute_step(step, plan, executor)
-                    for step in runnable
-                ])
-            else:
-                # Execute sequentially
-                for step in runnable:
-                    await self._execute_step(step, plan, executor)
-                    
-                    # Check for failure
-                    if step.status == TaskStatus.FAILED and step.retries >= step.max_retries:
-                        break
+                if not runnable:
+                    # No more steps can run - either done or blocked
+                    if plan.pending_steps:
+                        # Steps are blocked
+                        for step in plan.pending_steps:
+                            step.status = TaskStatus.BLOCKED
+                    break
+                
+                if parallel and len(runnable) > 1:
+                    # Execute in parallel
+                    await asyncio.gather(*[
+                        self._execute_step(step, plan, executor)
+                        for step in runnable
+                    ])
+                else:
+                    # Execute sequentially
+                    for step in runnable:
+                        await self._execute_step(step, plan, executor)
+                        
+                        # Check for failure
+                        if step.status == TaskStatus.FAILED and step.retries >= step.max_retries:
+                            break
+        except asyncio.CancelledError:
+            for step in plan.pending_steps:
+                step.status = TaskStatus.FAILED
+                step.error = "Plan execution cancelled"
+            plan.status = TaskStatus.FAILED
         
         # Determine final plan status
         if plan.is_complete:
@@ -675,41 +707,60 @@ Return a JSON object:
         """Execute a single step."""
         step.status = TaskStatus.IN_PROGRESS
         step.started_at = datetime.now()
+        self._last_progress_ts = time.time()
         
         if self._on_step_started:
             self._on_step_started(step)
         
         try:
-            if executor:
-                # Use custom executor
-                result = await executor(step) if asyncio.iscoroutinefunction(executor) else executor(step)
-                step.result = str(result) if result else "Completed"
-            elif step.tool and self.tools:
-                # Execute the specified tool
-                logger.info(f"Executing tool {step.tool} for step: {step.title}")
-                
-                # Special handling for file_write - populate content from previous steps
-                tool_args = dict(step.tool_args) if step.tool_args else {}
-                if step.tool == "file_write":
-                    content = tool_args.get("content", "")
-                    # If content is a placeholder or too short, synthesize from completed steps
-                    if not content or len(content) < 50 or "will be generated" in content.lower() or "..." in content:
-                        logger.info("File write content is placeholder, synthesizing from completed steps...")
-                        synthesized_content = await self._synthesize_content_for_file(plan, step)
-                        if synthesized_content:
-                            tool_args["content"] = synthesized_content
-                
-                result = await self.tools.execute(step.tool, tool_args)
-                step.result = str(result) if result else "Completed"
-            else:
+            async def run_step() -> Any:
+                if executor:
+                    # Use custom executor
+                    return await executor(step) if asyncio.iscoroutinefunction(executor) else executor(step)
+                if step.tool and self.tools:
+                    # Execute the specified tool
+                    logger.info(f"Executing tool {step.tool} for step: {step.title}")
+                    
+                    # Special handling for file_write - populate content from previous steps
+                    tool_args = dict(step.tool_args) if step.tool_args else {}
+                    if step.tool == "file_write":
+                        content = tool_args.get("content", "")
+                        # If content is a placeholder or too short, synthesize from completed steps
+                        if not content or len(content) < 50 or "will be generated" in content.lower() or "..." in content:
+                            logger.info("File write content is placeholder, synthesizing from completed steps...")
+                            synthesized_content = await self._synthesize_content_for_file(plan, step)
+                            if synthesized_content:
+                                tool_args["content"] = synthesized_content
+                    
+                    return await self.tools.execute(step.tool, tool_args)
+
                 # No specific tool - use LLM to reason and execute
                 logger.info(f"Using LLM to execute step: {step.title}")
-                result = await self._llm_execute_step(step, plan)
+                return await self._llm_execute_step(step, plan)
+
+            if self.step_timeout_secs:
+                result = await asyncio.wait_for(run_step(), timeout=self.step_timeout_secs)
+            else:
+                result = await run_step()
+
+            if step.tool and self.tools:
+                step.result = self._format_tool_result(result)
+            else:
                 step.result = str(result) if result else "Completed"
             
             step.status = TaskStatus.COMPLETED
             logger.info(f"Step completed: {step.title} - {step.result[:100] if step.result else 'done'}")
             
+        except asyncio.TimeoutError:
+            step.error = f"Step timed out after {self.step_timeout_secs} seconds"
+            step.retries += 1
+            
+            if step.retries < step.max_retries:
+                step.status = TaskStatus.PENDING  # Will retry
+                logger.warning(f"Step {step.id} timed out, will retry ({step.retries}/{step.max_retries})")
+            else:
+                step.status = TaskStatus.FAILED
+                logger.error(f"Step {step.id} timed out permanently")
         except Exception as e:
             step.error = str(e)
             step.retries += 1
@@ -722,9 +773,27 @@ Return a JSON object:
                 logger.error(f"Step {step.id} failed permanently: {e}")
         
         step.completed_at = datetime.now()
+        self._last_progress_ts = time.time()
         
         if self._on_step_completed:
             self._on_step_completed(step)
+
+    @staticmethod
+    def _unwrap_tool_data(result: Any) -> Any:
+        """Extract the data payload from structured tool results."""
+        if isinstance(result, dict) and "data" in result and "success" in result:
+            return result.get("data")
+        return result
+
+    @staticmethod
+    def _format_tool_result(result: Any) -> str:
+        """Format tool results for storage without truncation."""
+        if isinstance(result, (dict, list)):
+            try:
+                return json.dumps(result, ensure_ascii=False)
+            except Exception:
+                return str(result)
+        return str(result) if result is not None else ""
     
     async def _llm_execute_step(self, step: TaskStep, plan: TaskPlan) -> str:
         """

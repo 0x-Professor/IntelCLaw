@@ -17,7 +17,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Annotated, Dict, List, Optional, Sequence, TypedDict, TYPE_CHECKING
+from typing import Any, Annotated, Awaitable, Dict, List, Optional, Sequence, TypedDict, TYPE_CHECKING
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -156,6 +156,10 @@ class AgentOrchestrator(BaseAgent):
             "queue": [],
             "progress": 0,
         }
+        # Concurrency controls
+        self._state_lock = asyncio.Lock()
+        self._pending_tasks: set[asyncio.Task] = set()
+        self._shutdown = False
         
         logger.info("AgentOrchestrator created")
     
@@ -215,13 +219,53 @@ class AgentOrchestrator(BaseAgent):
     async def shutdown(self) -> None:
         """Shutdown the orchestrator."""
         logger.info("Shutting down AgentOrchestrator...")
+        self._shutdown = True
         self.status = AgentStatus.IDLE
         await self._update_workflow_state(status=self.status.value)
+
+        # Cancel any pending background tasks (plan callbacks, etc.)
+        if self._pending_tasks:
+            for task in list(self._pending_tasks):
+                task.cancel()
+            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
+            self._pending_tasks.clear()
         
         # Shutdown sub-agents
         for agent in self.sub_agents.values():
             if hasattr(agent, 'shutdown'):
                 await agent.shutdown()
+
+        # Cleanup LLM provider if supported
+        if self._llm_provider:
+            cleanup = getattr(self._llm_provider, "cleanup", None)
+            close = getattr(self._llm_provider, "close", None)
+            try:
+                if callable(cleanup):
+                    result = cleanup()
+                    if asyncio.iscoroutine(result):
+                        await result
+                elif callable(close):
+                    result = close()
+                    if asyncio.iscoroutine(result):
+                        await result
+            except Exception as e:
+                logger.debug(f"LLM provider cleanup failed: {e}")
+
+        # Clear state to avoid leaks
+        self._conversation_history.clear()
+        self._compiled_graph = None
+        self._graph = None
+        self._llm = None
+        self._llm_provider = None
+
+        # Break potential callback cycles
+        if self._task_planner:
+            self._task_planner._on_plan_created = None
+            self._task_planner._on_step_started = None
+            self._task_planner._on_step_completed = None
+            self._task_planner._on_plan_completed = None
+
+        # Note: Orchestrator does not subscribe to the event bus, so no unsubscribe needed.
         
         logger.info("AgentOrchestrator shutdown complete")
     
@@ -317,8 +361,29 @@ class AgentOrchestrator(BaseAgent):
 
     async def _update_workflow_state(self, **updates: Any) -> None:
         """Update internal workflow state and broadcast to UI."""
-        self._workflow_state.update(updates)
-        await self._emit_event("agent.workflow", self._workflow_state)
+        async with self._state_lock:
+            self._workflow_state.update(updates)
+            snapshot = dict(self._workflow_state)
+        await self._emit_event("agent.workflow", snapshot)
+
+    def _track_task(self, coro: Awaitable[Any]) -> Optional[asyncio.Task]:
+        """Track background tasks for proper cleanup on shutdown."""
+        if self._shutdown:
+            return None
+        task = asyncio.create_task(coro)
+        self._pending_tasks.add(task)
+        task.add_done_callback(lambda t: self._pending_tasks.discard(t))
+        return task
+
+    async def _set_active_plan(self, plan: Optional[TaskPlan]) -> None:
+        """Set the active plan with concurrency protection."""
+        async with self._state_lock:
+            self._active_plan = plan
+
+    async def _get_active_plan(self) -> Optional[TaskPlan]:
+        """Get the active plan with concurrency protection."""
+        async with self._state_lock:
+            return self._active_plan
     
     # =========================================================================
     # Task Planner Callbacks for UI Updates
@@ -326,11 +391,11 @@ class AgentOrchestrator(BaseAgent):
     
     def _on_plan_created(self, plan: TaskPlan) -> None:
         """Callback when a new plan is created."""
-        asyncio.create_task(self._async_on_plan_created(plan))
+        self._track_task(self._async_on_plan_created(plan))
     
     async def _async_on_plan_created(self, plan: TaskPlan) -> None:
         """Async handler for plan creation."""
-        self._active_plan = plan
+        await self._set_active_plan(plan)
         step_titles = [s.title for s in plan.steps]
         
         await self._update_workflow_state(
@@ -354,11 +419,11 @@ class AgentOrchestrator(BaseAgent):
     
     def _on_step_started(self, step: TaskStep) -> None:
         """Callback when a step starts execution."""
-        asyncio.create_task(self._async_on_step_started(step))
+        self._track_task(self._async_on_step_started(step))
     
     async def _async_on_step_started(self, step: TaskStep) -> None:
         """Async handler for step start."""
-        plan = self._active_plan
+        plan = await self._get_active_plan()
         if not plan:
             return
         
@@ -384,11 +449,11 @@ class AgentOrchestrator(BaseAgent):
     
     def _on_step_completed(self, step: TaskStep) -> None:
         """Callback when a step completes."""
-        asyncio.create_task(self._async_on_step_completed(step))
+        self._track_task(self._async_on_step_completed(step))
     
     async def _async_on_step_completed(self, step: TaskStep) -> None:
         """Async handler for step completion."""
-        plan = self._active_plan
+        plan = await self._get_active_plan()
         if not plan:
             return
         
@@ -415,7 +480,7 @@ class AgentOrchestrator(BaseAgent):
     
     def _on_plan_completed(self, plan: TaskPlan) -> None:
         """Callback when a plan completes."""
-        asyncio.create_task(self._async_on_plan_completed(plan))
+        self._track_task(self._async_on_plan_completed(plan))
     
     async def _async_on_plan_completed(self, plan: TaskPlan) -> None:
         """Async handler for plan completion."""
@@ -431,18 +496,55 @@ class AgentOrchestrator(BaseAgent):
             "failed_steps": len(plan.failed_steps),
         })
         
-        self._active_plan = None
+        await self._set_active_plan(None)
         logger.info(f"Plan {plan.id} completed: {plan.status.value}")
 
     def _needs_web_research(self, message: str) -> bool:
         """Heuristic: decide if a query needs web search."""
-        msg = (message or "").lower()
+        msg = (message or "").lower().strip()
+        if not msg:
+            return False
+
+        # Explicit opt-out phrases
+        opt_out = [
+            "don't search", "do not search", "no web search", "without web",
+            "without browsing", "offline", "no internet", "skip web", "avoid web"
+        ]
+        if any(phrase in msg for phrase in opt_out):
+            return False
+
         indicators = [
             "latest", "recent", "today", "current", "news", "trend", "trends",
             "this week", "this month", "update", "release", "announcement",
-            "breaking", "market", "report", "survey", "benchmark"
+            "breaking", "market", "report", "survey", "benchmark",
+            "pricing", "price", "writeup", "cve", "vulnerability", "patch",
+            "release notes", "changelog", "new version", "version",
+            "search the web", "web search", "look up", "browse the web"
         ]
-        return any(ind in msg for ind in indicators)
+
+        # Tokenize for negation-aware matching
+        words = re.findall(r"[a-z0-9']+", msg)
+        negations = {"no", "not", "don't", "dont", "without", "avoid", "skip", "never"}
+
+        def is_negated(start_idx: int) -> bool:
+            window_start = max(0, start_idx - 3)
+            return any(w in negations for w in words[window_start:start_idx])
+
+        # Check indicators with negation window
+        for indicator in indicators:
+            indicator_words = re.findall(r"[a-z0-9']+", indicator)
+            if not indicator_words:
+                continue
+            for idx in range(len(words) - len(indicator_words) + 1):
+                if words[idx:idx + len(indicator_words)] == indicator_words:
+                    if not is_negated(idx):
+                        return True
+
+        # Year-based recency cues (e.g., 2024/2025/2026)
+        if re.search(r"\b20(1\d|2\d)\b", msg):
+            return True
+
+        return False
 
     async def _fetch_web_context(self, query: str) -> str:
         """Fetch web search results for a query using available tools."""
@@ -475,6 +577,42 @@ class AgentOrchestrator(BaseAgent):
         if len(context) > self._web_context_max_chars:
             context = context[: self._web_context_max_chars] + "..."
         return context
+
+    async def _gather_request_context(self, context: AgentContext) -> Dict[str, Any]:
+        """Gather RAG/web/screen context once per request."""
+        gathered: Dict[str, Any] = {
+            "screen_context": context.screen_context,
+            "active_window": context.active_window,
+        }
+        tasks: List[tuple[str, Any]] = []
+
+        if self.memory and hasattr(self.memory, 'get_rag_context'):
+            tasks.append((
+                "rag_context",
+                self.memory.get_rag_context(
+                    query=context.user_message,
+                    include_persona=True,
+                    include_session=True,
+                    max_context_chars=5000,
+                ),
+            ))
+
+        if self._auto_web_search and self._needs_web_research(context.user_message):
+            tasks.append(("web_context", self._fetch_web_context(context.user_message)))
+
+        if tasks:
+            results = await asyncio.gather(
+                *[coro for _, coro in tasks],
+                return_exceptions=True,
+            )
+            for (key, _), result in zip(tasks, results):
+                if isinstance(result, Exception):
+                    logger.warning(f"Failed to gather {key}: {result}")
+                    continue
+                if result:
+                    gathered[key] = result
+
+        return gathered
 
     def _should_plan(self, user_message: str) -> bool:
         """Heuristic: determine if the task benefits from a multi-step plan."""
@@ -595,22 +733,95 @@ class AgentOrchestrator(BaseAgent):
         
         return False
 
+    def _parse_plan_json_candidates(self, content: str) -> List[str]:
+        """Extract top-level JSON array candidates from text using bracket balancing."""
+        if not content:
+            return []
+        candidates: List[str] = []
+        depth = 0
+        start_idx: Optional[int] = None
+        in_str = False
+        escape = False
+        for i, ch in enumerate(content):
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+            if in_str:
+                continue
+            if ch == "[":
+                if depth == 0:
+                    start_idx = i
+                depth += 1
+            elif ch == "]" and depth > 0:
+                depth -= 1
+                if depth == 0 and start_idx is not None:
+                    candidates.append(content[start_idx:i + 1])
+                    start_idx = None
+        return candidates
+
+    def _extract_json_array(self, content: str) -> Optional[Any]:
+        """Extract JSON content (array or object) from LLM output."""
+        if not content:
+            return None
+
+        # 1) Prefer fenced code blocks (```json ... ```)
+        for match in re.finditer(r"```(?:json)?\s*(.*?)```", content, re.DOTALL | re.IGNORECASE):
+            block = match.group(1).strip()
+            try:
+                return json.loads(block)
+            except Exception:
+                continue
+
+        # 2) Scan for top-level JSON arrays
+        for candidate in self._parse_plan_json_candidates(content):
+            try:
+                return json.loads(candidate)
+            except Exception:
+                continue
+
+        return None
+
+    def _normalize_plan_steps(self, payload: Any) -> List[str]:
+        """Normalize a JSON payload into a list of non-empty step strings."""
+        steps: List[str] = []
+
+        if isinstance(payload, dict):
+            for key in ("steps", "plan", "tasks"):
+                if key in payload:
+                    return self._normalize_plan_steps(payload.get(key))
+            return steps
+
+        if isinstance(payload, list):
+            for item in payload:
+                if isinstance(item, str):
+                    steps.append(item)
+                elif isinstance(item, dict):
+                    for key in ("title", "step", "description", "task", "name"):
+                        val = item.get(key)
+                        if val:
+                            steps.append(str(val))
+                            break
+            return steps
+
+        return steps
+
     def _parse_plan(self, content: str) -> List[str]:
         """Parse a plan from LLM output (JSON list or bullet list)."""
         if not content:
             return []
         
-        # Try JSON extraction first
-        try:
-            json_start = content.find("[")
-            json_end = content.rfind("]")
-            if json_start != -1 and json_end != -1 and json_end > json_start:
-                parsed = json.loads(content[json_start:json_end + 1])
-                if isinstance(parsed, list):
-                    steps = [str(s).strip() for s in parsed if str(s).strip()]
-                    return steps[: self._planning_max_steps]
-        except Exception:
-            pass
+        # Try robust JSON extraction first
+        parsed = self._extract_json_array(content)
+        if parsed is not None:
+            steps = self._normalize_plan_steps(parsed)
+            steps = [s.strip() for s in steps if s and str(s).strip()]
+            if steps:
+                return steps[: self._planning_max_steps]
         
         # Fallback to line-based parsing
         steps = []
@@ -728,7 +939,7 @@ class AgentOrchestrator(BaseAgent):
         prompt_context["iteration"] = state.get("iteration", 0)
         prompt_context["max_iterations"] = state.get("max_iterations", self._max_iterations)
         
-        system_prompt = self._get_system_prompt(prompt_context)
+        system_prompt = await self._get_system_prompt(prompt_context)
         
         messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
         
@@ -962,6 +1173,14 @@ class AgentOrchestrator(BaseAgent):
             return "plan"
         
         return self._should_continue(state)
+
+    def _append_history(self, *messages: BaseMessage) -> None:
+        """Append messages to conversation history and keep it bounded."""
+        for msg in messages:
+            if msg:
+                self._conversation_history.append(msg)
+        if len(self._conversation_history) > self._max_history:
+            self._conversation_history = self._conversation_history[-self._max_history:]
     
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
         """Execute a tool through the registry."""
@@ -1002,20 +1221,30 @@ class AgentOrchestrator(BaseAgent):
             
             return f"Error executing {tool_name}: {error_msg}"
     
-    def _load_persona_files(self) -> Dict[str, str]:
+    async def _load_persona_files(self) -> Dict[str, str]:
         """
         Load persona markdown files (OpenClaw-style context injection).
         
         Returns:
             Dict mapping filename to content
         """
-        persona_content = {}
+        persona_content: Dict[str, str] = {}
+        
+        try:
+            import aiofiles  # type: ignore
+        except Exception as e:
+            logger.warning(f"aiofiles not available, falling back to thread-based reads: {e}")
+            aiofiles = None
         
         for filename in self.PERSONA_FILES:
             filepath = self.PERSONA_DIR / filename
             try:
                 if filepath.exists():
-                    content = filepath.read_text(encoding="utf-8")
+                    if aiofiles:
+                        async with aiofiles.open(filepath, "r", encoding="utf-8") as f:
+                            content = await f.read()
+                    else:
+                        content = await asyncio.to_thread(filepath.read_text, encoding="utf-8")
                     # Truncate large files
                     if len(content) > self.BOOTSTRAP_MAX_CHARS:
                         content = content[:self.BOOTSTRAP_MAX_CHARS] + "\n\n[... truncated ...]"
@@ -1026,7 +1255,7 @@ class AgentOrchestrator(BaseAgent):
         
         return persona_content
     
-    def _get_system_prompt(self, context: Dict[str, Any]) -> str:
+    async def _get_system_prompt(self, context: Dict[str, Any]) -> str:
         """
         Build the system prompt using persona files (OpenClaw-style).
         
@@ -1042,7 +1271,7 @@ class AgentOrchestrator(BaseAgent):
                 current_model = llm.model
         
         # Load persona files
-        persona = self._load_persona_files()
+        persona = await self._load_persona_files()
         
         # Build system prompt sections
         sections = []
@@ -1222,18 +1451,21 @@ Focus only on the current plan step unless the user changes the goal.
             if sub_agent:
                 logger.info(f"Delegating to {delegation.agent_name}")
                 return await sub_agent.process(context)
+
+        # Gather shared context once per request
+        shared_context = await self._gather_request_context(context)
         
         # =========================================================================
         # COMPLEX TASK HANDLING: Use TaskPlanner for multi-step tasks
         # =========================================================================
         if self._task_planner and self._is_complex_task(context.user_message):
             logger.info("Complex task detected - using TaskPlanner for structured execution")
-            return await self._process_with_task_planner(context, start_time)
+            return await self._process_with_task_planner(context, start_time, shared_context)
         
         # =========================================================================
         # SIMPLE TASK HANDLING: Use standard REACT workflow
         # =========================================================================
-        react_response = await self._process_with_react(context, start_time)
+        react_response = await self._process_with_react(context, start_time, shared_context)
         
         # If the request clearly requires tools but none were used, fall back to TaskPlanner
         if (
@@ -1243,12 +1475,15 @@ Focus only on the current plan step unless the user changes the goal.
             and not react_response.tools_used
         ):
             logger.info("No tools were used for a tool-required request; falling back to TaskPlanner execution.")
-            return await self._process_with_task_planner(context, start_time)
+            return await self._process_with_task_planner(context, start_time, shared_context)
         
         return react_response
     
     async def _process_with_task_planner(
-        self, context: AgentContext, start_time: float
+        self,
+        context: AgentContext,
+        start_time: float,
+        shared_context: Optional[Dict[str, Any]] = None,
     ) -> AgentResponse:
         """
         Process a complex request using the TaskPlanner for structured execution.
@@ -1271,34 +1506,21 @@ Focus only on the current plan step unless the user changes the goal.
         # Gather additional context for planning
         additional_context = {}
         
-        # Get RAG context from memory
-        if self.memory and hasattr(self.memory, 'get_rag_context'):
-            try:
-                rag_context = await self.memory.get_rag_context(
-                    query=context.user_message,
-                    include_persona=True,
-                    include_session=True,
-                    max_context_chars=3000
-                )
-                if rag_context:
-                    additional_context["rag_context"] = rag_context
-            except Exception as e:
-                logger.warning(f"Failed to get RAG context for planning: {e}")
-        
-        # Get web context if needed
-        if self._auto_web_search and self._needs_web_research(context.user_message):
-            try:
-                web_context = await self._fetch_web_context(context.user_message)
-                if web_context:
-                    additional_context["web_context"] = web_context
-            except Exception as e:
-                logger.warning(f"Failed to get web context for planning: {e}")
-        
+        shared_context = shared_context or {}
+
+        # Use shared RAG/web context if available
+        if shared_context.get("rag_context"):
+            additional_context["rag_context"] = shared_context["rag_context"]
+        if shared_context.get("web_context"):
+            additional_context["web_context"] = shared_context["web_context"]
+
         # Add screen context
-        if context.screen_context:
-            additional_context["screen_context"] = context.screen_context.get("text", "")[:1000]
-        if context.active_window:
-            additional_context["active_window"] = context.active_window
+        screen_context = shared_context.get("screen_context") or context.screen_context
+        if screen_context:
+            additional_context["screen_context"] = screen_context.get("text", "")[:1000]
+        active_window = shared_context.get("active_window") or context.active_window
+        if active_window:
+            additional_context["active_window"] = active_window
         
         try:
             # Step 1: Create the plan
@@ -1314,7 +1536,7 @@ Focus only on the current plan step unless the user changes the goal.
             
             if not plan or not plan.steps:
                 logger.warning("TaskPlanner failed to create a plan, falling back to REACT")
-                return await self._process_with_react(context, start_time)
+                return await self._process_with_react(context, start_time, shared_context)
             
             # Step 2: Execute the plan
             await self._update_workflow_state(
@@ -1391,7 +1613,7 @@ Focus only on the current plan step unless the user changes the goal.
             logger.error(f"TaskPlanner execution failed: {e}")
             # Fallback to REACT workflow
             logger.info("Falling back to standard REACT workflow")
-            return await self._process_with_react(context, start_time)
+            return await self._process_with_react(context, start_time, shared_context)
     
     async def _synthesize_plan_response(self, plan: TaskPlan, original_goal: str) -> str:
         """
@@ -1436,7 +1658,12 @@ Be conversational and natural in your response."""
                       for s in plan.completed_steps]
             return "Here's what I accomplished:\n\n" + "\n".join(results)
     
-    async def _process_with_react(self, context: AgentContext, start_time: float) -> AgentResponse:
+    async def _process_with_react(
+        self,
+        context: AgentContext,
+        start_time: float,
+        shared_context: Optional[Dict[str, Any]] = None,
+    ) -> AgentResponse:
         """
         Process using the standard REACT workflow (existing implementation).
         
@@ -1444,30 +1671,20 @@ Be conversational and natural in your response."""
         method for use as a fallback when TaskPlanner isn't suitable.
         """
         # PRIORITY 1: First search persona files and vector memory for relevant data
-        rag_context = ""
+        shared_context = shared_context or {}
+        rag_context = shared_context.get("rag_context", "")
+        web_context = shared_context.get("web_context", "")
         user_preferences_context = ""
-        web_context = ""
-        
-        if self.memory and hasattr(self.memory, 'get_rag_context'):
-            try:
-                rag_context = await self.memory.get_rag_context(
-                    query=context.user_message,
-                    include_persona=True,
-                    include_session=True,
-                    max_context_chars=5000
-                )
-                
-                if hasattr(self.memory, 'agentic_rag') and self.memory.agentic_rag:
-                    prefs = await self.memory.agentic_rag.get_user_preferences(context.user_message)
-                    if prefs:
-                        user_preferences_context = "\n".join([
-                            f"- {p.get('content', '')}" for p in prefs[:5]
-                        ])
-            except Exception as e:
-                logger.warning(f"Failed to get RAG context: {e}")
 
-        if self._auto_web_search and self._needs_web_research(context.user_message):
-            web_context = await self._fetch_web_context(context.user_message)
+        if self.memory and hasattr(self.memory, 'agentic_rag') and self.memory.agentic_rag:
+            try:
+                prefs = await self.memory.agentic_rag.get_user_preferences(context.user_message)
+                if prefs:
+                    user_preferences_context = "\n".join([
+                        f"- {p.get('content', '')}" for p in prefs[:5]
+                    ])
+            except Exception as e:
+                logger.warning(f"Failed to get user preferences: {e}")
         
         user_message = HumanMessage(content=context.user_message)
         history_messages = self._conversation_history[-self._max_history:]
@@ -1479,8 +1696,10 @@ Be conversational and natural in your response."""
         initial_state: AgentState = {
             "messages": history_messages + [user_message],
             "context": {
-                "screen_text": context.screen_context.get("text") if context.screen_context else None,
-                "active_window": context.active_window,
+                "screen_text": (
+                    (shared_context.get("screen_context") or context.screen_context or {}).get("text")
+                ),
+                "active_window": shared_context.get("active_window") or context.active_window,
                 "user_preferences": combined_preferences,
                 "rag_context": rag_context,
                 "web_context": web_context,
@@ -1528,9 +1747,10 @@ Be conversational and natural in your response."""
                 else:
                     answer += "Please clarify if you'd like me to continue or adjust the plan."
             
-            self._conversation_history.append(user_message)
             if last_ai_message:
-                self._conversation_history.append(last_ai_message)
+                self._append_history(user_message, last_ai_message)
+            else:
+                self._append_history(user_message)
             
             thoughts = [
                 AgentThought(
@@ -1606,7 +1826,7 @@ Be conversational and natural in your response."""
                 current_model = self._llm.model
             
             # Build prompt using persona files (same as _get_system_prompt)
-            system_prompt = self._get_system_prompt({
+            system_prompt = await self._get_system_prompt({
                 "active_window": getattr(context, 'active_window', None),
                 "screen_text": context.screen_context.get("text") if context.screen_context else None,
                 "user_preferences": getattr(context, 'user_preferences', None),

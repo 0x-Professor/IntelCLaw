@@ -177,6 +177,18 @@ class FileWriteTool(BaseTool):
     ) -> ToolResult:
         """Write to file with proper handling."""
         try:
+            normalized_content = (content or "").strip()
+            if not normalized_content:
+                return ToolResult(
+                    success=False,
+                    error="Content is empty. Provide full content before writing."
+                )
+            placeholder_markers = ["...", "todo", "tbd", "will be generated", "placeholder"]
+            if normalized_content.lower() in placeholder_markers or "will be generated" in normalized_content.lower():
+                return ToolResult(
+                    success=False,
+                    error="Content appears to be a placeholder. Provide the complete content."
+                )
             # Handle various path formats
             path = path.strip().strip('"').strip("'")
             file_path = Path(path).expanduser().resolve()

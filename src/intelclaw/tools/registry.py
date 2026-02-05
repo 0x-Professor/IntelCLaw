@@ -264,6 +264,14 @@ class ToolRegistry:
             ShellCommandTool, CodeExecutionTool, PipInstallTool,
             PowerShellTool, SystemInfoTool
         )
+        from intelclaw.tools.builtin.windows import (
+            WindowsServicesTool,
+            WindowsTasksTool,
+            WindowsRegistryTool,
+            WindowsEventLogTool,
+            WindowsUIAutomationTool,
+            WindowsCIMTool,
+        )
         
         builtin_tools = [
             # Search tools
@@ -289,6 +297,13 @@ class ToolRegistry:
             CodeExecutionTool(),
             PipInstallTool(),
             PowerShellTool(),
+            # Windows native tools
+            WindowsServicesTool(),
+            WindowsTasksTool(),
+            WindowsRegistryTool(),
+            WindowsEventLogTool(),
+            WindowsUIAutomationTool(),
+            WindowsCIMTool(),
         ]
         
         for tool in builtin_tools:
