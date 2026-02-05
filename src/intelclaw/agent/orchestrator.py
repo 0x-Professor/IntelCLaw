@@ -470,7 +470,7 @@ class AgentOrchestrator(BaseAgent):
             "step_id": step.id,
             "title": step.title,
             "status": step.status.value,
-            "result": step.result[:500] if step.result else None,
+            "result": step.result[:2000] if step.result else None,
             "error": step.error,
             "progress": progress,
         })
@@ -1189,7 +1189,7 @@ class AgentOrchestrator(BaseAgent):
                 "step": state["iteration"],
                 "type": "observe",
                 "tool": last_message.name,
-                "observation": last_message.content[:500],  # Truncate for logging
+                "observation": last_message.content[:5000],  # Keep full context for LLM
                 "timestamp": datetime.now().isoformat(),
             }
             new_thoughts = list(state["thoughts"]) + [thought]
@@ -1784,7 +1784,7 @@ Focus only on the current plan step unless the user changes the goal.
                         last_result = s.result
                         break
                 if last_result:
-                    answer += f"Last result: {last_result[:500]}"
+                    answer += f"Last result: {last_result}"
             
             latency = (time.time() - start_time) * 1000
             
@@ -1827,14 +1827,14 @@ Focus only on the current plan step unless the user changes the goal.
             results = []
             for step in plan.completed_steps:
                 if step.result:
-                    results.append(f"• {step.title}: {step.result[:200]}")
+                    results.append(f"• {step.title}: {step.result}")
             return "Here's what I accomplished:\n\n" + "\n".join(results)
         
         # Build a summary of what was done
         step_summaries = []
         for step in plan.steps:
             status = "✓" if step.status == PlanTaskStatus.COMPLETED else "✗"
-            result_preview = (step.result or step.error or "")[:150]
+            result_preview = (step.result or step.error or "")[:2000]
             step_summaries.append(f"{status} {step.title}: {result_preview}")
         
         synthesis_prompt = f"""You are summarizing the results of a multi-step task execution.
@@ -1855,7 +1855,7 @@ Be conversational and natural in your response."""
         except Exception as e:
             logger.warning(f"Failed to synthesize response: {e}")
             # Fallback
-            results = [f"• {s.title}: {s.result[:100] if s.result else 'done'}" 
+            results = [f"• {s.title}: {s.result if s.result else 'done'}" 
                       for s in plan.completed_steps]
             return "Here's what I accomplished:\n\n" + "\n".join(results)
     
@@ -1944,7 +1944,7 @@ Be conversational and natural in your response."""
                     answer = "I couldn't generate a final response. "
                 
                 if last_tool_message:
-                    answer += f"Last tool output ({last_tool_message.name}): {last_tool_message.content[:500]}"
+                    answer += f"Last tool output ({last_tool_message.name}): {last_tool_message.content[:5000]}"
                 else:
                     answer += "Please clarify if you'd like me to continue or adjust the plan."
             

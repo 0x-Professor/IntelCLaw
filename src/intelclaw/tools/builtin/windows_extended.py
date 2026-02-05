@@ -46,6 +46,7 @@ async def _run_powershell(script: str, timeout: int = 60) -> ToolResult:
         stderr_str = stderr.decode("utf-8", errors="replace") if stderr else ""
 
         success = process.returncode == 0
+        error_msg = stderr_str.strip() if not success else None
         return ToolResult(
             success=success,
             data={
@@ -53,6 +54,7 @@ async def _run_powershell(script: str, timeout: int = 60) -> ToolResult:
                 "stderr": stderr_str.strip(),
                 "return_code": process.returncode,
             },
+            error=error_msg,
             metadata={"script": script[:200]},
         )
     except Exception as e:
@@ -161,10 +163,10 @@ class ProcessManagementTool(BaseTool):
             }
             sort_col = sort_map.get(sort_by, "WorkingSet64")
             ps.append(
-                f"Get-Process | Sort-Object -{sort_col} -Descending | "
+                f"Get-Process | Sort-Object {sort_col} -Descending | "
                 f"Select-Object -First {int(limit)} Id, ProcessName, "
-                "@{{Name='CPU_Seconds';Expression={{[math]::Round($_.CPU,2)}}}}, "
-                "@{{Name='Memory_MB';Expression={{[math]::Round($_.WorkingSet64/1MB,1)}}}}, "
+                "@{Name='CPU_Seconds';Expression={[math]::Round($_.CPU,2)}}, "
+                "@{Name='Memory_MB';Expression={[math]::Round($_.WorkingSet64/1MB,1)}}, "
                 "MainWindowTitle, StartTime, Path | ConvertTo-Json -Depth 3"
             )
         elif action == "find":
@@ -173,8 +175,8 @@ class ProcessManagementTool(BaseTool):
             ps.append(
                 f"Get-Process -Name '{name}' -ErrorAction SilentlyContinue | "
                 f"Select-Object -First {int(limit)} Id, ProcessName, "
-                "@{{Name='CPU_Seconds';Expression={{[math]::Round($_.CPU,2)}}}}, "
-                "@{{Name='Memory_MB';Expression={{[math]::Round($_.WorkingSet64/1MB,1)}}}}, "
+                "@{Name='CPU_Seconds';Expression={[math]::Round($_.CPU,2)}}, "
+                "@{Name='Memory_MB';Expression={[math]::Round($_.WorkingSet64/1MB,1)}}, "
                 "MainWindowTitle, StartTime, Path | ConvertTo-Json -Depth 3"
             )
         elif action == "details":
@@ -209,16 +211,16 @@ class ProcessManagementTool(BaseTool):
             ps.append(
                 f"Get-Process | Sort-Object CPU -Descending | "
                 f"Select-Object -First {int(limit)} Id, ProcessName, "
-                "@{{Name='CPU_Seconds';Expression={{[math]::Round($_.CPU,2)}}}}, "
-                "@{{Name='Memory_MB';Expression={{[math]::Round($_.WorkingSet64/1MB,1)}}}} | "
+                "@{Name='CPU_Seconds';Expression={[math]::Round($_.CPU,2)}}, "
+                "@{Name='Memory_MB';Expression={[math]::Round($_.WorkingSet64/1MB,1)}} | "
                 "ConvertTo-Json -Depth 3"
             )
         elif action == "top_memory":
             ps.append(
                 f"Get-Process | Sort-Object WorkingSet64 -Descending | "
                 f"Select-Object -First {int(limit)} Id, ProcessName, "
-                "@{{Name='Memory_MB';Expression={{[math]::Round($_.WorkingSet64/1MB,1)}}}}, "
-                "@{{Name='CPU_Seconds';Expression={{[math]::Round($_.CPU,2)}}}} | "
+                "@{Name='Memory_MB';Expression={[math]::Round($_.WorkingSet64/1MB,1)}}, "
+                "@{Name='CPU_Seconds';Expression={[math]::Round($_.CPU,2)}} | "
                 "ConvertTo-Json -Depth 3"
             )
         elif action == "tree":

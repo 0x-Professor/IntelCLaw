@@ -613,8 +613,8 @@ Return a JSON object:
         if self.tools:
             try:
                 tool_defs = self.tools.list_tools()
-                for td in tool_defs[:20]:  # Limit to 20 tools
-                    tool_info.append(f"- {td.name}: {td.description[:100]}")
+                for td in tool_defs:
+                    tool_info.append(f"- {td.name}: {td.description[:150]}")
             except Exception as e:
                 logger.debug(f"Failed to get tools: {e}")
         
@@ -829,7 +829,7 @@ Return a JSON object:
                 step.result = str(result) if result else "Completed"
             
             step.status = TaskStatus.COMPLETED
-            logger.info(f"Step completed: {step.title} - {step.result[:100] if step.result else 'done'}")
+            logger.info(f"Step completed: {step.title} - {step.result[:2000] if step.result else 'done'}")
             
         except asyncio.TimeoutError:
             step.error = f"Step timed out after {self.step_timeout_secs} seconds"
@@ -905,16 +905,15 @@ Return a JSON object:
                 completed_context.append(f"- {s.title}:\n{s.result if s.result else 'done'}")
                 full_results[s.id] = s.result
             else:
-                # Summarize for other steps
-                result_preview = s.result[:500] if s.result else 'done'
-                completed_context.append(f"- {s.title}: {result_preview}{'...' if s.result and len(s.result) > 500 else ''}")
+                # Include full results for proper context
+                completed_context.append(f"- {s.title}: {s.result if s.result else 'done'}")
         
         # Get available tools
         available_tools = []
         if self.tools:
             try:
                 tool_list = self.tools.list_tools()
-                available_tools = [t.name for t in tool_list[:20]]  # Limit to 20 tools
+                available_tools = [t.name for t in tool_list]
             except Exception:
                 pass
         
@@ -1093,7 +1092,7 @@ Return ONLY the document content (no code blocks, no explanations, just the mark
         # Gather context from completed steps
         completed_context = []
         for step in plan.completed_steps:
-            completed_context.append(f"✓ {step.title}: {step.result[:100] if step.result else 'done'}")
+            completed_context.append(f"✓ {step.title}: {step.result[:2000] if step.result else 'done'}")
         
         # Get failed step info
         failed_info = ""
