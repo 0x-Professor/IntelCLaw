@@ -30,7 +30,7 @@ class IntelCLawApp {
     /**
      * Initialize the application
      */
-    init() {
+    async init() {
         console.log('[App] Initializing IntelCLaw Control UI...');
         
         this._cacheElements();
@@ -38,7 +38,19 @@ class IntelCLawApp {
         this._setupWebSocket();
         this._loadModels();  // Load models from API
         this._applySettings();
-        this._createNewSession();
+
+        // Load persisted sessions from backend; fall back to a new session.
+        try {
+            await this._loadSessions();
+            if (this.sessions.length > 0) {
+                await this._switchToSession(this.sessions[0].session_id);
+            } else {
+                await this._createNewSession();
+            }
+        } catch (e) {
+            console.warn('[App] Failed to load sessions, creating new session:', e);
+            await this._createNewSession();
+        }
         
         console.log('[App] Initialization complete');
     }
@@ -172,6 +184,7 @@ class IntelCLawApp {
             settingsToggle: document.getElementById('settingsToggle'),
             sessionSelector: document.getElementById('sessionSelector'),
             currentSession: document.getElementById('currentSession'),
+            sessionList: document.getElementById('sessionList'),
             
             // Status
             connectionDot: document.getElementById('connectionDot'),
@@ -1006,8 +1019,21 @@ class IntelCLawApp {
     /**
      * Create new session
      */
-    _createNewSession() {
-        this.currentSessionId = 'session_' + Date.now();
+    async _createNewSession() {
+        // Create on backend so it is persisted and shows up in the session list.
+        try {
+            const resp = await fetch('/api/sessions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const data = await resp.json();
+            this.currentSessionId = data.session_id || ('session_' + Date.now());
+        } catch (e) {
+            console.warn('[App] Failed to create session via API, using fallback id:', e);
+            this.currentSessionId = 'session_' + Date.now();
+        }
+
         this.messages = [];
         
         // Clear messages UI
@@ -1018,8 +1044,90 @@ class IntelCLawApp {
         // Update session display
         this.elements.currentSession.textContent = 'New Session';
         
-        // Notify backend
+        // Notify backend (WebSocket current session)
         this.ws.send('new_session', { session_id: this.currentSessionId });
+
+        await this._loadSessions();
+        this._renderSessionList();
+    }
+
+    /**
+     * Load sessions from backend and render in sidebar.
+     */
+    async _loadSessions() {
+        const resp = await fetch('/api/sessions?limit=50&offset=0');
+        const data = await resp.json();
+        this.sessions = Array.isArray(data.sessions) ? data.sessions : [];
+        this._renderSessionList();
+    }
+
+    _renderSessionList() {
+        const container = this.elements.sessionList;
+        if (!container) return;
+        container.innerHTML = '';
+
+        this.sessions.forEach((s) => {
+            const sid = s.session_id;
+            const title = (s.title && s.title.trim()) ? s.title.trim() : sid;
+            const count = s.message_count ?? 0;
+
+            const item = document.createElement('a');
+            item.href = '#';
+            item.className = 'nav-item' + (sid === this.currentSessionId ? ' active' : '');
+            item.dataset.sessionId = sid;
+            item.innerHTML = `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                <span class="nav-item-text">${title}</span>
+                <span class="nav-badge">${count}</span>
+            `;
+            item.addEventListener('click', async (e) => {
+                e.preventDefault();
+                await this._switchToSession(sid);
+            });
+            container.appendChild(item);
+        });
+    }
+
+    /**
+     * Switch to an existing session and load its messages.
+     */
+    async _switchToSession(sessionId) {
+        if (!sessionId) return;
+        this.currentSessionId = sessionId;
+        this.ws.send('new_session', { session_id: this.currentSessionId });
+
+        // Load messages from backend
+        const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
+        const data = await resp.json();
+        const msgs = Array.isArray(data.messages) ? data.messages : [];
+
+        // Render
+        this.messages = [];
+        this.elements.messagesContainer.innerHTML = '';
+        this.elements.messagesContainer.appendChild(this.elements.emptyState);
+
+        if (msgs.length === 0) {
+            this.elements.emptyState.classList.remove('hidden');
+        } else {
+            this.elements.emptyState.classList.add('hidden');
+            msgs.forEach((m) => {
+                this._addMessage({
+                    role: m.role,
+                    content: m.content,
+                    timestamp: m.created_at,
+                    id: m.id
+                });
+            });
+        }
+
+        // Update session title in header
+        const session = this.sessions.find((s) => s.session_id === sessionId);
+        const title = session && session.title ? session.title : 'Session';
+        this.elements.currentSession.textContent = title;
+
+        this._renderSessionList();
     }
 
     /**

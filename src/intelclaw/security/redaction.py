@@ -20,6 +20,8 @@ _STRONG_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
     # Tavily
     re.compile(r"\btvly-[A-Za-z0-9_-]{20,}\b"),
+    # Jina AI
+    re.compile(r"\bjina_[A-Za-z0-9]{20,}\b"),
     # Slack
     re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b"),
     # PEM blocks
@@ -83,4 +85,3 @@ def redact_secrets(text: str) -> str:
         text = _TOKEN_LONG.sub("[REDACTED]", text)
 
     return text
-

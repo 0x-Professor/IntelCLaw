@@ -13,7 +13,9 @@
 - **🤖 REACT Agent Architecture**: Multi-agent system using LangChain/LangGraph with ReAct (Reasoning + Acting) pattern
 - **👁️ Screen Understanding**: Real-time screen capture, OCR, and UI element recognition
 - **🧠 Persistent Memory**: Local long-term memory (SQLite) with safe secret redaction (Mem0 optional)
+- **🗂️ Session Archive**: All chat sessions stored locally (SQLite) so you can switch to any session
 - **📄 PDF RAG (PageIndex)**: Auto-ingest PDFs and retrieve relevant nodes from cached document trees
+- **🧩 Embeddings (Jina AI)**: Optional Jina-powered embeddings for higher-quality semantic context retrieval
 - **🎯 Task Automation**: Execute complex multi-step workflows autonomously
 - **🔍 Intelligent Search**: Web search (Tavily), file search, and semantic RAG retrieval
 - **📁 File Operations**: Read, write, search files with smart encoding detection and backup support
@@ -32,7 +34,7 @@
 - **Python**: 3.11 or higher
 - **Package Manager**: [uv](https://github.com/astral-sh/uv) (recommended) or pip
 - **Tesseract OCR**: For screen text recognition
-- **API Keys**: OpenAI (required), Tavily (optional), PageIndex (optional for PDF RAG)
+- **API Keys**: OpenAI (optional), Tavily (optional), PageIndex (optional for PDF RAG), Jina (optional for embeddings)
 
 ---
 
@@ -72,6 +74,7 @@ TAVILY_API_KEY=tvly-your-tavily-key
 ANTHROPIC_API_KEY=sk-ant-your-anthropic-key
 GITHUB_TOKEN=ghp_your-github-token
 PAGEINDEX_API_KEY=your-pageindex-key
+JINA_API_KEY=your-jina-key
 ```
 
 > Security note: If you pasted an API key into chat/logs, treat it as compromised and rotate it in the provider dashboard.
@@ -108,6 +111,10 @@ uv run python main.py --debug
 ### Summon the Agent
 
 Press **`Ctrl+Shift+Space`** to open the overlay interface.
+
+### Sessions (Web UI)
+
+The web gateway persists all chat sessions locally to `data/sessions.db`. Use the **Sessions** list in the sidebar to switch between previous sessions.
 
 ### Quick Commands
 

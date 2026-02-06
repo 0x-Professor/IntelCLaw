@@ -55,6 +55,7 @@ class AgentContext:
     """Context passed to agent during execution."""
     
     user_message: str
+    session_id: Optional[str] = None
     conversation_history: List[Dict[str, str]] = field(default_factory=list)
     screen_context: Optional[Dict[str, Any]] = None
     active_window: Optional[str] = None

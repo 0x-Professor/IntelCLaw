@@ -443,7 +443,10 @@ Return a JSON object:
         
         if research_needed.get("needs_rag") and self.enable_rag:
             queries = research_needed.get("rag_queries", [goal])
-            rag_results = await self._perform_rag_search(queries)
+            sid = None
+            if isinstance(context, dict):
+                sid = context.get("session_id")
+            rag_results = await self._perform_rag_search(queries, session_id=str(sid) if sid else None)
             gathered_context["rag"] = rag_results
         
         # Step 3: Generate the plan using LLM
@@ -569,7 +572,9 @@ Return a JSON object:
         
         return results
     
-    async def _perform_rag_search(self, queries: List[str]) -> List[Dict[str, Any]]:
+    async def _perform_rag_search(
+        self, queries: List[str], *, session_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Perform RAG search for the given queries."""
         results = []
         
@@ -581,7 +586,8 @@ Return a JSON object:
                 context = await self.memory.get_rag_context(
                     query=query,
                     include_persona=True,
-                    max_context_chars=2000
+                    max_context_chars=2000,
+                    session_id=session_id,
                 )
                 if context:
                     results.append({"query": query, "context": context})
@@ -633,6 +639,13 @@ Return a JSON object:
             context_str += "\n\nProject Context:\n"
             for item in gathered_context["rag"]:
                 context_str += item.get("context", "")[:500] + "\n"
+
+        # Include recent raw conversation (no summarization) when provided.
+        if isinstance(context, dict):
+            recent = context.get("conversation_recent")
+            if recent:
+                context_str += "\n\nRecent Conversation:\n"
+                context_str += str(recent)[:2000] + "\n"
         
         system_prompt = self.PLANNING_SYSTEM_PROMPT.format(
             tools=tools_str,

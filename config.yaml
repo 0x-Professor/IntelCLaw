@@ -69,6 +69,32 @@ autonomy:
 memory:
   max_conversation_history: 200
   working_db_path: data/working_memory.db
+  sessions:
+    enabled: true
+    db_path: data/sessions.db
+    embeddings:
+      provider: jina
+      model: jina-embeddings-v3
+      late_chunking: true
+      normalized: true
+    chunking:
+      max_chars: 900
+      overlap_chars: 120
+    retrieval:
+      candidate_pool: 200
+      top_k_hits: 8
+      max_windows: 3
+      window_messages_before: 2
+      window_messages_after: 2
+      include_other_sessions: true
+      exclude_last_n_messages: 20
+      max_context_chars: 8000
+      semantic_weight: 0.75
+      lexical_weight: 0.2
+      recency_weight: 0.05
+      recency_half_life_hours: 72
+    redaction:
+      on_detect: redact
   vector_store:
     collection: intelclaw
     path: data/vector_db

@@ -57,6 +57,37 @@ class ConfigManager:
         "memory": {
             "max_conversation_history": 50,
             "working_db_path": "data/working_memory.db",
+            "sessions": {
+                "enabled": True,
+                "db_path": "data/sessions.db",
+                "embeddings": {
+                    "provider": "jina",
+                    "model": "jina-embeddings-v3",
+                    "late_chunking": True,
+                    "normalized": True,
+                },
+                "chunking": {
+                    "max_chars": 900,
+                    "overlap_chars": 120,
+                },
+                "retrieval": {
+                    "candidate_pool": 200,
+                    "top_k_hits": 8,
+                    "max_windows": 3,
+                    "window_messages_before": 2,
+                    "window_messages_after": 2,
+                    "include_other_sessions": True,
+                    "exclude_last_n_messages": 20,
+                    "max_context_chars": 8000,
+                    "semantic_weight": 0.75,
+                    "lexical_weight": 0.20,
+                    "recency_weight": 0.05,
+                    "recency_half_life_hours": 72.0,
+                },
+                "redaction": {
+                    "on_detect": "redact",  # "skip" or "redact"
+                },
+            },
             "vector_store": {
                 "collection": "intelclaw",
                 "path": "data/vector_db",

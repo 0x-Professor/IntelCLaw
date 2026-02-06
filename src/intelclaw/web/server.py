@@ -388,12 +388,76 @@ class WebServer:
             """REST endpoint for chat (non-WebSocket)."""
             data = await request.json()
             message = data.get("message", "")
+            session_id = data.get("session_id")
             
             if not message:
                 return JSONResponse({"error": "No message provided"}, status_code=400)
             
-            response = await self._process_message(message)
-            return {"response": response, "model": self.current_model}
+            response = await self._process_message(message, session_id=session_id)
+            return {"response": response, "model": self.current_model, "session_id": session_id}
+
+        # ==================== Sessions API ====================
+
+        @self.fastapi.get("/api/sessions")
+        async def list_sessions(limit: int = 50, offset: int = 0):
+            """List locally persisted chat sessions."""
+            if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
+                store = self._app.memory.session_store
+                try:
+                    sessions = await store.list_sessions(limit=limit, offset=offset)
+                    return {"sessions": sessions, "count": len(sessions)}
+                except Exception as e:
+                    logger.warning(f"Failed to list sessions: {e}")
+            return {"sessions": [], "count": 0}
+
+        @self.fastapi.post("/api/sessions")
+        async def create_session(request: Request):
+            """Create a new chat session."""
+            try:
+                payload = await request.json()
+            except Exception:
+                payload = {}
+            title = payload.get("title") if isinstance(payload, dict) else None
+
+            if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
+                store = self._app.memory.session_store
+                try:
+                    sid = await store.create_session(title=title)
+                    return {"session_id": sid}
+                except Exception as e:
+                    logger.warning(f"Failed to create session: {e}")
+            # Fallback: generate an ID even if persistence is unavailable
+            import uuid
+
+            return {"session_id": f"session_{uuid.uuid4().hex[:12]}"}
+
+        @self.fastapi.get("/api/sessions/{session_id}")
+        async def get_session_messages(session_id: str, limit: Optional[int] = None):
+            """Get messages for a given session."""
+            if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
+                store = self._app.memory.session_store
+                try:
+                    msgs = await store.get_messages(session_id, limit=limit)
+                    return {"session_id": session_id, "messages": msgs, "count": len(msgs)}
+                except Exception as e:
+                    logger.warning(f"Failed to get session messages: {e}")
+            return {"session_id": session_id, "messages": [], "count": 0}
+
+        @self.fastapi.delete("/api/sessions/{session_id}")
+        async def delete_session(session_id: str, confirm: bool = False):
+            """Delete a session (requires confirm=true)."""
+            if not confirm:
+                return JSONResponse({"error": "confirm=true required"}, status_code=400)
+
+            if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
+                store = self._app.memory.session_store
+                try:
+                    ok = await store.delete_session(session_id)
+                    return {"session_id": session_id, "deleted": bool(ok)}
+                except Exception as e:
+                    logger.warning(f"Failed to delete session: {e}")
+                    return JSONResponse({"error": str(e)}, status_code=500)
+            return {"session_id": session_id, "deleted": False}
         
         @self.fastapi.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
@@ -423,7 +487,10 @@ class WebServer:
                     msg_type = data.get("type", "chat")
                     
                     if msg_type == "chat":
-                        await self._handle_chat(data, websocket, current_session_id)
+                        # Prefer session_id passed on the message; fall back to current session.
+                        msg_session_id = data.get("session_id") or current_session_id
+                        current_session_id = msg_session_id
+                        await self._handle_chat(data, websocket, msg_session_id)
                     
                     elif msg_type == "set_model":
                         new_model = data.get("model", self.current_model)
@@ -467,6 +534,17 @@ class WebServer:
                     elif msg_type == "new_session":
                         current_session_id = data.get("session_id")
                         logger.info(f"New session: {current_session_id}")
+                        # Best-effort: ensure session exists in persistent store.
+                        if (
+                            current_session_id
+                            and self._app
+                            and getattr(self._app, "memory", None)
+                            and getattr(self._app.memory, "session_store", None)
+                        ):
+                            try:
+                                await self._app.memory.session_store.ensure_session(str(current_session_id))
+                            except Exception:
+                                pass
                     
                     elif msg_type == "get_state":
                         if self._app and self._app.agent and hasattr(self._app.agent, "get_workflow_state"):
@@ -547,7 +625,7 @@ class WebServer:
                 }, websocket)
             else:
                 # Non-streaming response
-                response = await self._process_message(message, settings)
+                response = await self._process_message(message, settings, session_id=session_id)
                 
                 # Store assistant message
                 if session_id:
@@ -574,7 +652,13 @@ class WebServer:
                 "message": str(e)
             }, websocket)
     
-    async def _process_message(self, message: str, settings: Optional[dict] = None) -> str:
+    async def _process_message(
+        self,
+        message: str,
+        settings: Optional[dict] = None,
+        *,
+        session_id: Optional[str] = None,
+    ) -> str:
         """Process a user message through the agent."""
         if not self._app or not self._app.agent:
             # Demo mode - return helpful response
@@ -585,6 +669,7 @@ class WebServer:
             
             context = AgentContext(
                 user_message=message,
+                session_id=session_id,
                 screen_context=None,
                 active_window=None,
                 user_preferences=settings or {}

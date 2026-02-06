@@ -33,6 +33,7 @@ from intelclaw.integrations.pageindex_api import (
 from intelclaw.memory.pageindex_store import PageIndexStore, sha256_file
 from intelclaw.memory.tool_docs import ToolDocsIndex
 from intelclaw.security.redaction import contains_secret, redact_secrets
+from intelclaw.memory.session_store import SessionStore
 
 if TYPE_CHECKING:
     from intelclaw.memory.long_term import LongTermMemory
@@ -239,6 +240,7 @@ class AgenticRAG:
         llm_provider: Optional[Any] = None,
         vector_store: Optional["VectorStore"] = None,
         long_term: Optional["LongTermMemory"] = None,
+        session_store: Optional[SessionStore] = None,
     ):
         """
         Initialize Agentic RAG.
@@ -255,11 +257,12 @@ class AgenticRAG:
         self.llm_provider = llm_provider
         self._vector_store = vector_store
         self._long_term = long_term
+        self._session_store = session_store
         
         # Document trees for hierarchical indexing
         self.document_trees: Dict[str, DocumentTree] = {}
         
-        # Session memory
+        # Session memory (delegated to SessionStore when available)
         self.session_memories: List[Dict[str, Any]] = []
         
         # Parsed tool docs (from persona/TOOLS.md)
@@ -1329,6 +1332,10 @@ class AgenticRAG:
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Store session conversation for future context."""
+        if self._session_store and getattr(self._session_store, "is_enabled", False):
+            await self._session_store.add_messages(session_id, messages, title_hint=(metadata or {}).get("title"))
+            return
+
         safe_messages: List[Dict[str, Any]] = []
         secret_detected = False
         for m in messages:
@@ -1368,6 +1375,15 @@ class AgenticRAG:
         max_sessions: int = 3
     ) -> List[Dict[str, Any]]:
         """Get relevant past session context for a query."""
+        if self._session_store and getattr(self._session_store, "is_enabled", False):
+            # Return raw message windows (no summarization) across sessions.
+            windows = await self._session_store.retrieve_context_windows(
+                query,
+                session_id=None,
+                max_windows=max_sessions,
+            )
+            return windows
+
         relevant_sessions = []
         
         # Simple keyword matching (in full implementation, use LLM reasoning)
@@ -1425,6 +1441,7 @@ class AgenticRAG:
         include_session: bool = True,
         max_context_chars: int = 10000,
         available_tool_names: Optional[set[str]] = None,
+        session_id: Optional[str] = None,
     ) -> str:
         """
         Build comprehensive context for a query.
@@ -1536,17 +1553,33 @@ class AgenticRAG:
             except Exception as e:
                 logger.debug(f"Long-term memory context build unavailable: {e}")
 
-        # Relevant past sessions (short excerpts)
+        # Relevant session context (raw excerpts, no summarization)
         if include_session:
-            sessions = await self.get_session_context(query, max_sessions=2)
-            if sessions:
-                add("## Relevant Past Sessions\n")
-                for session in sessions[:2]:
-                    for m in session.get("messages", [])[-4:]:
-                        role = str(m.get("role", "unknown"))
-                        content = str(m.get("content", "")).strip()
-                        add(f"- {role}: {content[:200]}\n")
-                    add("\n")
+            try:
+                windows = []
+                if self._session_store and getattr(self._session_store, "is_enabled", False):
+                    windows = await self._session_store.retrieve_context_windows(
+                        query,
+                        session_id=session_id,
+                        max_windows=2,
+                    )
+                else:
+                    windows = await self.get_session_context(query, max_sessions=2)
+
+                if windows:
+                    add("## Relevant Session Context\n")
+                    for w in windows[:2]:
+                        sid = str(w.get("session_id") or "")
+                        title = str(w.get("title") or "") or sid
+                        add(f"### {title} (session={sid})\n")
+                        for m in w.get("messages", []) or []:
+                            role = str(m.get("role", "unknown"))
+                            content = str(m.get("content", "")).strip()
+                            if content:
+                                add(f"- {role}: {content}\n")
+                        add("\n")
+            except Exception as e:
+                logger.debug(f"Session context retrieval unavailable: {e}")
 
         return "\n".join(context_parts).strip()
     

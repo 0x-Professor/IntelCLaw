@@ -606,6 +606,7 @@ class AgentOrchestrator(BaseAgent):
                     include_session=True,
                     max_context_chars=5000,
                     available_tool_names=available_tool_names,
+                    session_id=getattr(context, "session_id", None),
                 ),
             ))
 
@@ -1337,6 +1338,78 @@ class AgentOrchestrator(BaseAgent):
         if len(self._conversation_history) > self._max_history:
             self._conversation_history = self._conversation_history[-self._max_history:]
 
+    async def _load_history_messages(self, session_id: Optional[str]) -> List[BaseMessage]:
+        """
+        Load recent conversation history.
+
+        If SessionStore is enabled, this loads the last N messages for the given session.
+        Otherwise, falls back to in-memory history for the current process.
+        """
+        sid = (session_id or "").strip()
+        store = getattr(self.memory, "session_store", None) if self.memory else None
+        if sid and store and getattr(store, "is_enabled", False):
+            try:
+                rows = await store.get_messages(sid, limit=self._max_history)
+                out: List[BaseMessage] = []
+                for r in rows or []:
+                    role = str(r.get("role") or "").lower()
+                    content = str(r.get("content") or "")
+                    if not content:
+                        continue
+                    if role == "user":
+                        out.append(HumanMessage(content=content))
+                    elif role == "assistant":
+                        out.append(AIMessage(content=content))
+                    elif role == "system":
+                        out.append(SystemMessage(content=content))
+                return out
+            except Exception as e:
+                logger.debug(f"Failed to load session history (session_id={sid}): {e}")
+
+        return self._conversation_history[-self._max_history:]
+
+    @staticmethod
+    def _format_recent_conversation(history_messages: Sequence[BaseMessage], max_chars: int = 2000) -> str:
+        """Format raw recent conversation into a compact string (no summarization)."""
+        total = 0
+        lines: List[str] = []
+        for msg in list(history_messages)[-12:]:
+            role = "message"
+            if isinstance(msg, HumanMessage):
+                role = "user"
+            elif isinstance(msg, AIMessage):
+                role = "assistant"
+            elif isinstance(msg, SystemMessage):
+                role = "system"
+
+            content = getattr(msg, "content", "")
+            line = f"{role}: {content}".strip()
+            if not line:
+                continue
+            if total + len(line) + 1 > max_chars:
+                remaining = max_chars - total
+                if remaining <= 0:
+                    break
+                line = line[:remaining]
+            lines.append(line)
+            total += len(line) + 1
+            if total >= max_chars:
+                break
+        return "\n".join(lines)
+
+    async def _store_session_message(self, session_id: Optional[str], role: str, content: str) -> None:
+        """Best-effort persistence of raw session messages (with redaction handled by SessionStore)."""
+        sid = (session_id or "").strip()
+        if not sid or not self.memory:
+            return
+        store = getattr(self.memory, "session_store", None)
+        if not store or not getattr(store, "is_enabled", False):
+            return
+        try:
+            await store.add_message(sid, role=str(role or "user"), content=str(content or ""))
+        except Exception as e:
+            logger.debug(f"Failed to store session message (session_id={sid}, role={role}): {e}")
+
     @staticmethod
     def _tool_signature(tool_name: str, tool_args: Dict[str, Any]) -> str:
         """Create a stable signature for tool deduplication."""
@@ -1698,6 +1771,16 @@ Focus only on the current plan step unless the user changes the goal.
             last_tool_error=None,
             progress=0,
         )
+
+        # Normalize session_id (used for persistent session history and context retrieval).
+        sid = str(getattr(context, "session_id", "") or "").strip() or "default"
+        context.session_id = sid
+
+        # Load recent history (per-session if SessionStore enabled; otherwise in-memory).
+        history_messages = await self._load_history_messages(sid)
+
+        # Persist the raw user message to the session store early (best-effort).
+        await self._store_session_message(sid, role="user", content=context.user_message)
         
         # Check if should delegate to sub-agent
         delegation = await self.router.route(context)
@@ -1705,7 +1788,28 @@ Focus only on the current plan step unless the user changes the goal.
             sub_agent = self.sub_agents.get(delegation.agent_name)
             if sub_agent:
                 logger.info(f"Delegating to {delegation.agent_name}")
-                return await sub_agent.process(context)
+                response = await sub_agent.process(context)
+                # Finalize (session persistence + memory extraction)
+                await self._store_session_message(sid, role="assistant", content=response.answer)
+                if self.memory:
+                    await self.memory.store_interaction(
+                        user_message=context.user_message,
+                        agent_response=response.answer,
+                        tools_used=response.tools_used,
+                    )
+                store = getattr(self.memory, "session_store", None) if self.memory else None
+                if not (store and getattr(store, "is_enabled", False)):
+                    try:
+                        self._append_history(
+                            HumanMessage(content=context.user_message), AIMessage(content=response.answer)
+                        )
+                    except Exception:
+                        pass
+                await self._extract_and_store_preferences(
+                    user_message=context.user_message,
+                    agent_response=response.answer,
+                )
+                return response
 
         # Gather shared context once per request
         shared_context = await self._gather_request_context(context)
@@ -1715,12 +1819,28 @@ Focus only on the current plan step unless the user changes the goal.
         # =========================================================================
         if self._task_planner and self._is_complex_task(context.user_message):
             logger.info("Complex task detected - using TaskPlanner for structured execution")
-            return await self._process_with_task_planner(context, start_time, shared_context)
+            response = await self._process_with_task_planner(
+                context, start_time, shared_context, history_messages=history_messages
+            )
+            await self._store_session_message(sid, role="assistant", content=response.answer)
+            if self.memory:
+                await self.memory.store_interaction(
+                    user_message=context.user_message,
+                    agent_response=response.answer,
+                    tools_used=response.tools_used,
+                )
+            await self._extract_and_store_preferences(
+                user_message=context.user_message,
+                agent_response=response.answer,
+            )
+            return response
         
         # =========================================================================
         # SIMPLE TASK HANDLING: Use standard REACT workflow
         # =========================================================================
-        react_response = await self._process_with_react(context, start_time, shared_context)
+        react_response = await self._process_with_react(
+            context, start_time, shared_context, history_messages=history_messages
+        )
         
         # If the request clearly requires tools but none were used, fall back to TaskPlanner
         if (
@@ -1730,8 +1850,33 @@ Focus only on the current plan step unless the user changes the goal.
             and not react_response.tools_used
         ):
             logger.info("No tools were used for a tool-required request; falling back to TaskPlanner execution.")
-            return await self._process_with_task_planner(context, start_time, shared_context)
+            response = await self._process_with_task_planner(
+                context, start_time, shared_context, history_messages=history_messages
+            )
+            await self._store_session_message(sid, role="assistant", content=response.answer)
+            if self.memory:
+                await self.memory.store_interaction(
+                    user_message=context.user_message,
+                    agent_response=response.answer,
+                    tools_used=response.tools_used,
+                )
+            await self._extract_and_store_preferences(
+                user_message=context.user_message,
+                agent_response=response.answer,
+            )
+            return response
         
+        await self._store_session_message(sid, role="assistant", content=react_response.answer)
+        if self.memory:
+            await self.memory.store_interaction(
+                user_message=context.user_message,
+                agent_response=react_response.answer,
+                tools_used=react_response.tools_used,
+            )
+        await self._extract_and_store_preferences(
+            user_message=context.user_message,
+            agent_response=react_response.answer,
+        )
         return react_response
     
     async def _process_with_task_planner(
@@ -1739,6 +1884,7 @@ Focus only on the current plan step unless the user changes the goal.
         context: AgentContext,
         start_time: float,
         shared_context: Optional[Dict[str, Any]] = None,
+        history_messages: Optional[Sequence[BaseMessage]] = None,
     ) -> AgentResponse:
         """
         Process a complex request using the TaskPlanner for structured execution.
@@ -1776,6 +1922,13 @@ Focus only on the current plan step unless the user changes the goal.
         active_window = shared_context.get("active_window") or context.active_window
         if active_window:
             additional_context["active_window"] = active_window
+
+        # Session-aware planning context (raw, no summarization)
+        additional_context["session_id"] = getattr(context, "session_id", None)
+        if history_messages:
+            additional_context["conversation_recent"] = self._format_recent_conversation(
+                history_messages, max_chars=2000
+            )
         
         try:
             # Step 1: Create the plan
@@ -1791,7 +1944,9 @@ Focus only on the current plan step unless the user changes the goal.
             
             if not plan or not plan.steps:
                 logger.warning("TaskPlanner failed to create a plan, falling back to REACT")
-                return await self._process_with_react(context, start_time, shared_context)
+                return await self._process_with_react(
+                    context, start_time, shared_context, history_messages=history_messages
+                )
             
             # Step 2: Execute the plan
             await self._update_workflow_state(
@@ -1841,14 +1996,14 @@ Focus only on the current plan step unless the user changes the goal.
                     answer += f"Last result: {last_result}"
             
             latency = (time.time() - start_time) * 1000
-            
-            # Store in memory
-            if self.memory:
-                await self.memory.store_interaction(
-                    user_message=context.user_message,
-                    agent_response=answer,
-                    tools_used=tools_used,
-                )
+
+            # Keep in-memory history only when SessionStore is unavailable.
+            store = getattr(self.memory, "session_store", None) if self.memory else None
+            if not (store and getattr(store, "is_enabled", False)):
+                try:
+                    self._append_history(HumanMessage(content=context.user_message), AIMessage(content=answer))
+                except Exception:
+                    pass
             
             self.status = AgentStatus.IDLE
             await self._update_workflow_state(
@@ -1868,7 +2023,9 @@ Focus only on the current plan step unless the user changes the goal.
             logger.error(f"TaskPlanner execution failed: {e}")
             # Fallback to REACT workflow
             logger.info("Falling back to standard REACT workflow")
-            return await self._process_with_react(context, start_time, shared_context)
+            return await self._process_with_react(
+                context, start_time, shared_context, history_messages=history_messages
+            )
     
     async def _synthesize_plan_response(self, plan: TaskPlan, original_goal: str) -> str:
         """
@@ -1918,6 +2075,7 @@ Be conversational and natural in your response."""
         context: AgentContext,
         start_time: float,
         shared_context: Optional[Dict[str, Any]] = None,
+        history_messages: Optional[Sequence[BaseMessage]] = None,
     ) -> AgentResponse:
         """
         Process using the standard REACT workflow (existing implementation).
@@ -1942,14 +2100,18 @@ Be conversational and natural in your response."""
                 logger.warning(f"Failed to get user preferences: {e}")
         
         user_message = HumanMessage(content=context.user_message)
-        history_messages = self._conversation_history[-self._max_history:]
+        hist: Sequence[BaseMessage]
+        if history_messages is not None:
+            hist = list(history_messages)
+        else:
+            hist = self._conversation_history[-self._max_history:]
         
         combined_preferences = context.user_preferences or {}
         if user_preferences_context:
             combined_preferences["mem0_preferences"] = user_preferences_context
         
         initial_state: AgentState = {
-            "messages": history_messages + [user_message],
+            "messages": list(hist) + [user_message],
             "context": {
                 "screen_text": (
                     (shared_context.get("screen_context") or context.screen_context or {}).get("text")
@@ -2005,10 +2167,13 @@ Be conversational and natural in your response."""
                 else:
                     answer += "Please clarify if you'd like me to continue or adjust the plan."
             
-            if last_ai_message:
-                self._append_history(user_message, last_ai_message)
-            else:
-                self._append_history(user_message)
+            # Keep in-memory history only when SessionStore is unavailable.
+            store = getattr(self.memory, "session_store", None) if self.memory else None
+            if not (store and getattr(store, "is_enabled", False)):
+                if last_ai_message:
+                    self._append_history(user_message, last_ai_message)
+                else:
+                    self._append_history(user_message)
             
             thoughts = [
                 AgentThought(
@@ -2021,33 +2186,6 @@ Be conversational and natural in your response."""
             ]
             
             latency = (time.time() - start_time) * 1000
-            
-            if self.memory:
-                await self.memory.store_interaction(
-                    user_message=context.user_message,
-                    agent_response=answer,
-                    tools_used=final_state["tools_used"],
-                )
-                
-                if hasattr(self.memory, 'rag_store_session'):
-                    import uuid
-                    session_messages = [
-                        {"role": "user", "content": context.user_message},
-                        {"role": "assistant", "content": answer}
-                    ]
-                    try:
-                        await self.memory.rag_store_session(
-                            session_id=str(uuid.uuid4())[:8],
-                            messages=session_messages,
-                            metadata={"tools_used": final_state["tools_used"]}
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to store RAG session: {e}")
-                
-                await self._extract_and_store_preferences(
-                    user_message=context.user_message,
-                    agent_response=answer
-                )
             
             self.status = AgentStatus.IDLE
             await self._update_workflow_state(status=self.status.value)
@@ -2101,6 +2239,14 @@ Be conversational and natural in your response."""
             answer = response.content if hasattr(response, 'content') else str(response)
             
             latency = (time.time() - start_time) * 1000
+
+            # Keep in-memory history only when SessionStore is unavailable.
+            store = getattr(self.memory, "session_store", None) if self.memory else None
+            if not (store and getattr(store, "is_enabled", False)):
+                try:
+                    self._append_history(HumanMessage(content=context.user_message), AIMessage(content=answer))
+                except Exception:
+                    pass
             
             self.status = AgentStatus.IDLE
             await self._update_workflow_state(status=self.status.value)

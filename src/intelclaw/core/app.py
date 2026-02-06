@@ -253,6 +253,7 @@ class IntelCLawApp:
         
         agent_context = AgentContext(
             user_message=message,
+            session_id="overlay",
             conversation_history=conversation_history,
             screen_context=screen_context,
             active_window=perception_context.get("active_window") if perception_context else None,

@@ -17,6 +17,7 @@ from intelclaw.memory.long_term import LongTermMemory
 from intelclaw.memory.vector_store import VectorStore
 from intelclaw.memory.agentic_rag import AgenticRAG
 from intelclaw.memory.pageindex_watcher import PageIndexWatcher, PageIndexWatcherConfig, WATCHDOG_AVAILABLE, _normalize_exts
+from intelclaw.memory.session_store import SessionStore, SessionStoreConfig
 
 if TYPE_CHECKING:
     from intelclaw.config.manager import ConfigManager
@@ -65,6 +66,9 @@ class MemoryManager:
         self.working: Optional[WorkingMemory] = None
         self.long_term: Optional[LongTermMemory] = None
         self.vector_store: Optional[VectorStore] = None
+
+        # Persistent session store (all chat sessions, raw messages)
+        self.session_store: Optional[SessionStore] = None
         
         # Agentic RAG system (reasoning-based retrieval)
         self.agentic_rag: Optional[AgenticRAG] = None
@@ -91,6 +95,61 @@ class MemoryManager:
         db_path = memory_config.get("working_db_path", "data/working_memory.db")
         self.working = WorkingMemory(db_path=db_path)
         await self.working.initialize()
+
+        # Initialize session store (persistent chat sessions)
+        sessions_cfg = memory_config.get("sessions", {}) if isinstance(memory_config, dict) else {}
+        if not isinstance(sessions_cfg, dict):
+            sessions_cfg = {}
+
+        def _get_nested(d: dict, *keys: str, default: Any = None) -> Any:
+            cur: Any = d
+            for k in keys:
+                if not isinstance(cur, dict) or k not in cur:
+                    return default
+                cur = cur[k]
+            return cur
+
+        sessions_enabled = bool(sessions_cfg.get("enabled", True))
+        if sessions_enabled:
+            redaction_mode = str(
+                _get_nested(sessions_cfg, "redaction", "on_detect", default="redact")
+            ).lower()
+            embeddings_cfg = _get_nested(sessions_cfg, "embeddings", default=None)
+            if not isinstance(embeddings_cfg, dict):
+                embeddings_cfg = {"provider": "jina"}
+
+            chunk_max = int(_get_nested(sessions_cfg, "chunking", "max_chars", default=sessions_cfg.get("chunk_max_chars", 900)))
+            chunk_overlap = int(
+                _get_nested(sessions_cfg, "chunking", "overlap_chars", default=sessions_cfg.get("chunk_overlap_chars", 120))
+            )
+
+            retrieval_cfg = _get_nested(sessions_cfg, "retrieval", default={})
+            if not isinstance(retrieval_cfg, dict):
+                retrieval_cfg = {}
+
+            self.session_store = SessionStore(
+                SessionStoreConfig(
+                    db_path=str(sessions_cfg.get("db_path", "data/sessions.db")),
+                    enabled=True,
+                    redaction_mode=redaction_mode,
+                    chunk_max_chars=chunk_max,
+                    chunk_overlap_chars=chunk_overlap,
+                    embeddings=dict(embeddings_cfg),
+                    candidate_pool=int(retrieval_cfg.get("candidate_pool", 200)),
+                    top_k_hits=int(retrieval_cfg.get("top_k_hits", 8)),
+                    max_windows=int(retrieval_cfg.get("max_windows", 3)),
+                    window_messages_before=int(retrieval_cfg.get("window_messages_before", 2)),
+                    window_messages_after=int(retrieval_cfg.get("window_messages_after", 2)),
+                    include_other_sessions=bool(retrieval_cfg.get("include_other_sessions", True)),
+                    exclude_last_n_messages=int(retrieval_cfg.get("exclude_last_n_messages", 20)),
+                    max_context_chars=int(retrieval_cfg.get("max_context_chars", 8000)),
+                    semantic_weight=float(retrieval_cfg.get("semantic_weight", 0.75)),
+                    lexical_weight=float(retrieval_cfg.get("lexical_weight", 0.20)),
+                    recency_weight=float(retrieval_cfg.get("recency_weight", 0.05)),
+                    recency_half_life_hours=float(retrieval_cfg.get("recency_half_life_hours", 72.0)),
+                )
+            )
+            await self.session_store.initialize()
         
         # Initialize long-term memory
         self.long_term = LongTermMemory(
@@ -120,6 +179,7 @@ class MemoryManager:
             persist_dir=rag_config.get("path", "data/agentic_rag"),
             vector_store=self.vector_store,
             long_term=self.long_term,
+            session_store=self.session_store,
         )
         await self.agentic_rag.initialize(rag_config)
         
@@ -169,6 +229,10 @@ class MemoryManager:
         
         if self.agentic_rag:
             await self.agentic_rag.shutdown()
+
+        if self.session_store:
+            await self.session_store.shutdown()
+            self.session_store = None
         
         if self.vector_store:
             await self.vector_store.shutdown()
@@ -376,6 +440,7 @@ class MemoryManager:
         include_session: bool = True,
         max_context_chars: int = 10000,
         available_tool_names: Optional[set[str]] = None,
+        session_id: Optional[str] = None,
     ) -> str:
         """
         Get comprehensive RAG context using reasoning-based retrieval.
@@ -399,6 +464,7 @@ class MemoryManager:
                 include_session=include_session,
                 max_context_chars=max_context_chars,
                 available_tool_names=available_tool_names,
+                session_id=session_id,
             )
         return ""
     
