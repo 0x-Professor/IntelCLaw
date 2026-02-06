@@ -27,8 +27,8 @@ models:
   primary: gpt-4o
   fallback: gpt-4o-mini
   coding: gpt-4o
-  temperature: 0.1
-  context_length: 8000
+  temperature: 1.0
+  context_length: 80000
 
 # Agent Workflow Settings
 agent:
@@ -39,13 +39,13 @@ agent:
     replan_on_failure: true
   execution:
     max_iterations: 12
-    max_tool_calls_per_iteration: 3
+    max_tool_calls_per_iteration: 5
     max_consecutive_errors: 3
   research:
     auto_web_search: true
-    max_results: 5
+    max_results: 10
     search_depth: basic
-    max_context_chars: 2000
+    max_context_chars: 40000
 
 # GitHub Copilot Integration
 copilot:
@@ -67,7 +67,7 @@ autonomy:
   require_confirmation_destructive: true  # Only destructive ops need confirmation
 
 memory:
-  max_conversation_history: 100
+  max_conversation_history: 200
   working_db_path: data/working_memory.db
   vector_store:
     collection: intelclaw
