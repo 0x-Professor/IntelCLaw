@@ -653,6 +653,46 @@ Return a JSON object:
             steps = self._parse_plan_response(content)
             
             if steps:
+                # Normalize/validate tool names against registry
+                if self.tools:
+                    try:
+                        available_tools = {t.name for t in self.tools.list_tools()}
+                    except Exception:
+                        available_tools = set()
+                    
+                    if available_tools:
+                        for step in steps:
+                            if not step.tool:
+                                continue
+                            
+                            normalized = step.tool
+                            for prefix in ("functions.", "tools.", "tool."):
+                                if normalized.startswith(prefix):
+                                    normalized = normalized[len(prefix):]
+                                    break
+                            
+                            # Preserve Codex parallel wrapper; warn if no args provided
+                            if normalized == "multi_tool_use.parallel":
+                                step.tool = "multi_tool_use.parallel"
+                                if not step.tool_args:
+                                    logger.warning(
+                                        f"Plan step '{step.title}' uses multi_tool_use.parallel without tool_args"
+                                    )
+                                    step.tool_args = step.tool_args or {}
+                                continue
+                            
+                            # Use normalized tool name if available
+                            if normalized in available_tools:
+                                step.tool = normalized
+                                continue
+                            
+                            # Unknown tool: fall back to LLM execution
+                            if step.tool not in available_tools:
+                                logger.warning(
+                                    f"Unknown tool in plan '{step.tool}' for step '{step.title}', falling back to LLM"
+                                )
+                                step.tool = None
+                
                 return steps
         except Exception as e:
             logger.warning(f"Plan generation failed: {e}")

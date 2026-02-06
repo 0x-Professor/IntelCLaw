@@ -5,6 +5,7 @@ Manages tool discovery, registration, and execution.
 """
 
 import asyncio
+import json
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from langchain_core.tools import BaseTool as LangChainBaseTool
@@ -136,6 +137,9 @@ class ToolRegistry:
         Returns:
             Tool result
         """
+        if name == "multi_tool_use.parallel":
+            return await self._execute_parallel_tool_uses(params or {}, check_permissions=check_permissions)
+
         tool = self._tools.get(name)
         if not tool:
             raise ValueError(f"Tool not found: {name}")
@@ -161,6 +165,145 @@ class ToolRegistry:
             return result.data
         else:
             raise RuntimeError(f"Tool execution failed: {result.error}")
+
+    @staticmethod
+    def _normalize_tool_name(name: Any) -> str:
+        """Normalize tool name, stripping known prefixes."""
+        if not name:
+            return ""
+        name_str = str(name).strip()
+        for prefix in ("functions.", "tools.", "tool."):
+            if name_str.startswith(prefix):
+                return name_str[len(prefix):]
+        return name_str
+
+    @staticmethod
+    def _normalize_tool_args(args: Any) -> Dict[str, Any]:
+        """Normalize tool arguments to a dict."""
+        if args is None:
+            return {}
+        if isinstance(args, str):
+            try:
+                parsed = json.loads(args)
+                return parsed if isinstance(parsed, dict) else {"input": parsed}
+            except Exception:
+                return {"input": args}
+        if isinstance(args, dict):
+            return args
+        return {"input": args}
+
+    async def _execute_parallel_tool_uses(
+        self,
+        params: Dict[str, Any],
+        check_permissions: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Execute a batch of tool calls (Codex-style parallel wrapper).
+
+        Expects params to include tool_uses (or tool_calls/calls) list.
+        """
+        tool_uses = (
+            params.get("tool_uses")
+            or params.get("tool_calls")
+            or params.get("calls")
+            or []
+        )
+
+        if not isinstance(tool_uses, list):
+            raise RuntimeError("multi_tool_use.parallel expects a list under 'tool_uses'")
+
+        if not tool_uses:
+            raise RuntimeError("multi_tool_use.parallel requires non-empty tool_uses")
+
+        entries: List[Dict[str, Any]] = []
+        tasks: List[Any] = []
+
+        for call in tool_uses:
+            if not isinstance(call, dict):
+                entries.append({
+                    "tool": None,
+                    "success": False,
+                    "error": "Invalid tool call format (expected object)",
+                })
+                continue
+
+            raw_name = call.get("recipient_name") or call.get("name") or call.get("tool_name")
+            tool_name = self._normalize_tool_name(raw_name)
+            call_id = call.get("id") or call.get("tool_call_id")
+
+            if not tool_name:
+                entries.append({
+                    "tool": raw_name,
+                    "id": call_id,
+                    "success": False,
+                    "error": "Missing tool name",
+                })
+                continue
+
+            if tool_name == "multi_tool_use.parallel":
+                entries.append({
+                    "tool": tool_name,
+                    "id": call_id,
+                    "success": False,
+                    "error": "Nested multi_tool_use.parallel is not supported",
+                })
+                continue
+
+            raw_args = call.get("parameters")
+            if raw_args is None:
+                raw_args = call.get("args")
+            if raw_args is None:
+                raw_args = call.get("arguments")
+
+            tool_args = self._normalize_tool_args(raw_args)
+
+            entries.append({
+                "tool": tool_name,
+                "id": call_id,
+                "args": tool_args,
+                "task_index": len(tasks),
+            })
+            tasks.append(self.execute(tool_name, tool_args, check_permissions=check_permissions))
+
+        if not tasks:
+            raise RuntimeError("multi_tool_use.parallel received no valid tool calls")
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        output_results: List[Dict[str, Any]] = []
+        success_count = 0
+
+        for entry in entries:
+            if "task_index" not in entry:
+                output_results.append(entry)
+                continue
+
+            result = results[entry["task_index"]]
+            if isinstance(result, Exception):
+                output_results.append({
+                    "tool": entry.get("tool"),
+                    "id": entry.get("id"),
+                    "args": entry.get("args", {}),
+                    "success": False,
+                    "error": str(result),
+                })
+            else:
+                success_count += 1
+                output_results.append({
+                    "tool": entry.get("tool"),
+                    "id": entry.get("id"),
+                    "args": entry.get("args", {}),
+                    "success": True,
+                    "result": result,
+                })
+
+        summary = {
+            "total": len(output_results),
+            "succeeded": success_count,
+            "failed": len(output_results) - success_count,
+        }
+
+        return {"results": output_results, "summary": summary}
     
     async def get_langchain_tools(self) -> List[LangChainBaseTool]:
         """
