@@ -23,6 +23,24 @@ if TYPE_CHECKING:
 # Get the static files directory
 STATIC_DIR = Path(__file__).parent / "static"
 
+try:
+    import yaml  # type: ignore
+
+    YAML_AVAILABLE = True
+except Exception:
+    yaml = None  # type: ignore
+    YAML_AVAILABLE = False
+
+
+class StaticFilesNoCache(StaticFiles):
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        resp = await super().get_response(path, scope)
+        try:
+            resp.headers["Cache-Control"] = "no-store"
+        except Exception:
+            pass
+        return resp
+
 
 class ConnectionManager:
     """Manages WebSocket connections."""
@@ -80,6 +98,8 @@ class WebServer:
         self._app = app
         self.host = host
         self.port = port
+        self._fallback_session_store = None
+        self._fallback_session_store_lock = asyncio.Lock()
         
         # Determine default model based on provider
         provider = os.getenv("INTELCLAW_PROVIDER", "github-models")
@@ -109,6 +129,84 @@ class WebServer:
         self._setup_routes()
         self._setup_event_subscriptions()
         self._server = None
+
+    def _get_sessions_db_path(self) -> str:
+        """Best-effort: load sessions db path from config.yaml (if available)."""
+        import os
+
+        default_path = "data/sessions.db"
+        cfg_path = Path(os.getenv("INTELCLAW_CONFIG", "config.yaml"))
+        if not cfg_path.exists() or not YAML_AVAILABLE:
+            return default_path
+
+        try:
+            content = cfg_path.read_text(encoding="utf-8")
+            data = yaml.safe_load(content) or {}  # type: ignore[union-attr]
+        except Exception:
+            return default_path
+
+        try:
+            memory = data.get("memory") if isinstance(data, dict) else None
+            sessions = memory.get("sessions") if isinstance(memory, dict) else None
+            db_path = sessions.get("db_path") if isinstance(sessions, dict) else None
+            if isinstance(db_path, str) and db_path.strip():
+                return db_path.strip()
+        except Exception:
+            pass
+
+        return default_path
+
+    async def _get_session_store(self):
+        """Get the app SessionStore, or lazily initialize a fallback store for demo mode."""
+        try:
+            if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
+                return self._app.memory.session_store
+        except Exception:
+            pass
+
+        async with self._fallback_session_store_lock:
+            if self._fallback_session_store is not None:
+                return self._fallback_session_store
+
+            try:
+                from intelclaw.memory.session_store import SessionStore, SessionStoreConfig
+
+                db_path = self._get_sessions_db_path()
+                store = SessionStore(SessionStoreConfig(db_path=db_path, enabled=True))
+                await store.initialize()
+                self._fallback_session_store = store
+                logger.info(f"Initialized fallback session store at {db_path}")
+                return store
+            except Exception as e:
+                logger.warning(f"Failed to initialize fallback session store: {e}")
+                self._fallback_session_store = None
+                return None
+
+    async def _persist_session_message_if_needed(self, session_id: Optional[str], role: str, content: str) -> None:
+        """
+        Persist a session message only when the agent isn't expected to do so.
+
+        - In full app mode, AgentOrchestrator persists via MemoryManager.session_store.
+        - In demo mode, we persist at the web layer so sessions can still be switched/reloaded.
+        """
+        sid = str(session_id or "").strip()
+        if not sid:
+            return
+
+        # If app+agent is present, assume the orchestrator is persisting.
+        if self._app and getattr(self._app, "agent", None) and getattr(self._app, "memory", None):
+            store = getattr(self._app.memory, "session_store", None)
+            if store and getattr(store, "is_enabled", False):
+                return
+
+        store = await self._get_session_store()
+        if not store or not getattr(store, "is_enabled", False):
+            return
+
+        try:
+            await store.add_message(sid, role=str(role or "user"), content=str(content or ""))
+        except Exception as e:
+            logger.debug(f"Failed to persist session message (session_id={sid}, role={role}): {e}")
 
     def _setup_event_subscriptions(self):
         """Subscribe to agent events for real-time UI updates."""
@@ -169,7 +267,7 @@ class WebServer:
         
         # Mount static files
         if STATIC_DIR.exists():
-            self.fastapi.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+            self.fastapi.mount("/static", StaticFilesNoCache(directory=str(STATIC_DIR)), name="static")
             logger.info(f"Mounted static files from: {STATIC_DIR}")
         else:
             logger.warning(f"Static directory not found: {STATIC_DIR}")
@@ -179,7 +277,11 @@ class WebServer:
             """Serve the main chat interface."""
             index_file = STATIC_DIR / "index.html"
             if index_file.exists():
-                return FileResponse(str(index_file), media_type="text/html")
+                return FileResponse(
+                    str(index_file),
+                    media_type="text/html",
+                    headers={"Cache-Control": "no-store"},
+                )
             else:
                 # Fallback to inline HTML if static files don't exist
                 return HTMLResponse(content=self._get_fallback_html())
@@ -392,8 +494,15 @@ class WebServer:
             
             if not message:
                 return JSONResponse({"error": "No message provided"}, status_code=400)
-            
+
+            # Persist raw user message in demo mode (best-effort).
+            await self._persist_session_message_if_needed(session_id, role="user", content=str(message))
+
             response = await self._process_message(message, session_id=session_id)
+
+            # Persist assistant response in demo mode (best-effort).
+            await self._persist_session_message_if_needed(session_id, role="assistant", content=str(response))
+
             return {"response": response, "model": self.current_model, "session_id": session_id}
 
         # ==================== Sessions API ====================
@@ -401,17 +510,18 @@ class WebServer:
         @self.fastapi.get("/api/sessions")
         async def list_sessions(limit: int = 50, offset: int = 0, q: Optional[str] = None):
             """List locally persisted chat sessions."""
-            if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
-                store = self._app.memory.session_store
-                try:
-                    if q:
-                        sessions = await store.search_sessions(str(q), limit=limit, offset=offset)
-                    else:
-                        sessions = await store.list_sessions(limit=limit, offset=offset)
-                    return {"sessions": sessions, "count": len(sessions)}
-                except Exception as e:
-                    logger.warning(f"Failed to list sessions: {e}")
-            return {"sessions": [], "count": 0}
+            store = await self._get_session_store()
+            if not store or not getattr(store, "is_enabled", False):
+                return {"sessions": [], "count": 0}
+            try:
+                if q:
+                    sessions = await store.search_sessions(str(q), limit=limit, offset=offset)
+                else:
+                    sessions = await store.list_sessions(limit=limit, offset=offset)
+                return {"sessions": sessions, "count": len(sessions)}
+            except Exception as e:
+                logger.warning(f"Failed to list sessions: {e}")
+                return {"sessions": [], "count": 0}
 
         @self.fastapi.post("/api/sessions")
         async def create_session(request: Request):
@@ -422,8 +532,8 @@ class WebServer:
                 payload = {}
             title = payload.get("title") if isinstance(payload, dict) else None
 
-            if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
-                store = self._app.memory.session_store
+            store = await self._get_session_store()
+            if store and getattr(store, "is_enabled", False):
                 try:
                     sid = await store.create_session(title=title)
                     return {"session_id": sid}
@@ -437,22 +547,37 @@ class WebServer:
         @self.fastapi.get("/api/sessions/{session_id}")
         async def get_session_messages(session_id: str, limit: Optional[int] = None):
             """Get messages for a given session."""
-            if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
-                store = self._app.memory.session_store
-                try:
-                    info = await store.get_session_info(session_id)
-                    msgs = await store.get_messages(session_id, limit=limit)
-                    return {
-                        "session_id": session_id,
-                        "exists": info is not None,
-                        "title": (info or {}).get("title") or "",
-                        "message_count": (info or {}).get("message_count"),
-                        "messages": msgs,
-                        "count": len(msgs),
-                    }
-                except Exception as e:
-                    logger.warning(f"Failed to get session messages: {e}")
-            return {"session_id": session_id, "exists": False, "title": "", "message_count": None, "messages": [], "count": 0}
+            store = await self._get_session_store()
+            if not store or not getattr(store, "is_enabled", False):
+                return {
+                    "session_id": session_id,
+                    "exists": False,
+                    "title": "",
+                    "message_count": None,
+                    "messages": [],
+                    "count": 0,
+                }
+            try:
+                info = await store.get_session_info(session_id)
+                msgs = await store.get_messages(session_id, limit=limit)
+                return {
+                    "session_id": session_id,
+                    "exists": info is not None,
+                    "title": (info or {}).get("title") or "",
+                    "message_count": (info or {}).get("message_count"),
+                    "messages": msgs,
+                    "count": len(msgs),
+                }
+            except Exception as e:
+                logger.warning(f"Failed to get session messages: {e}")
+                return {
+                    "session_id": session_id,
+                    "exists": False,
+                    "title": "",
+                    "message_count": None,
+                    "messages": [],
+                    "count": 0,
+                }
 
         @self.fastapi.delete("/api/sessions/{session_id}")
         async def delete_session(session_id: str, confirm: bool = False):
@@ -460,15 +585,15 @@ class WebServer:
             if not confirm:
                 return JSONResponse({"error": "confirm=true required"}, status_code=400)
 
-            if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
-                store = self._app.memory.session_store
-                try:
-                    ok = await store.delete_session(session_id)
-                    return {"session_id": session_id, "deleted": bool(ok)}
-                except Exception as e:
-                    logger.warning(f"Failed to delete session: {e}")
-                    return JSONResponse({"error": str(e)}, status_code=500)
-            return {"session_id": session_id, "deleted": False}
+            store = await self._get_session_store()
+            if not store or not getattr(store, "is_enabled", False):
+                return {"session_id": session_id, "deleted": False}
+            try:
+                ok = await store.delete_session(session_id)
+                return {"session_id": session_id, "deleted": bool(ok)}
+            except Exception as e:
+                logger.warning(f"Failed to delete session: {e}")
+                return JSONResponse({"error": str(e)}, status_code=500)
         
         @self.fastapi.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
@@ -546,14 +671,11 @@ class WebServer:
                         current_session_id = data.get("session_id")
                         logger.info(f"New session: {current_session_id}")
                         # Best-effort: ensure session exists in persistent store.
-                        if (
-                            current_session_id
-                            and self._app
-                            and getattr(self._app, "memory", None)
-                            and getattr(self._app.memory, "session_store", None)
-                        ):
+                        if current_session_id:
                             try:
-                                await self._app.memory.session_store.ensure_session(str(current_session_id))
+                                store = await self._get_session_store()
+                                if store and getattr(store, "is_enabled", False):
+                                    await store.ensure_session(str(current_session_id))
                             except Exception:
                                 pass
                     
@@ -617,6 +739,7 @@ class WebServer:
                 "content": message,
                 "timestamp": datetime.now().isoformat()
             })
+            await self._persist_session_message_if_needed(session_id, role="user", content=str(message))
         
         # Process message through agent
         try:
@@ -648,6 +771,7 @@ class WebServer:
                         "model": self.current_model,
                         "timestamp": datetime.now().isoformat()
                     })
+                    await self._persist_session_message_if_needed(session_id, role="assistant", content=str(response))
                 
                 await self.manager.send_message({
                     "type": "chat_response",
