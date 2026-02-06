@@ -322,6 +322,125 @@ class SessionStore:
             )
             return [dict(r) for r in cur.fetchall()]
 
+    async def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
+        if not self.is_enabled or self._conn is None:
+            return None
+
+        sid = str(session_id or "").strip()
+        if not sid:
+            return None
+
+        async with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                SELECT
+                    s.session_id,
+                    s.title,
+                    s.created_at,
+                    s.updated_at,
+                    (SELECT COUNT(1) FROM session_messages m WHERE m.session_id = s.session_id) as message_count
+                FROM sessions s
+                WHERE s.session_id = ?
+                """,
+                (sid,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    async def search_sessions(self, query: str, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Search sessions by title/session_id and (when available) message content.
+
+        - Uses FTS5 over session chunks if available.
+        - Falls back to LIKE token search over session_messages.
+        """
+        if not self.is_enabled or self._conn is None:
+            return []
+
+        q = str(query or "").strip()
+        if not q:
+            return await self.list_sessions(limit=limit, offset=offset)
+
+        like = f"%{q}%"
+
+        async with self._lock:
+            cur = self._conn.cursor()
+
+            # Prefer FTS if it exists; fall back gracefully on parse errors.
+            if self._fts_available:
+                try:
+                    cur.execute(
+                        """
+                        WITH combined AS (
+                            SELECT session_id, 0.0 AS rank
+                            FROM sessions
+                            WHERE (title LIKE ? OR session_id LIKE ?)
+
+                            UNION ALL
+
+                            SELECT session_id, MIN(bm25(session_chunks_fts)) AS rank
+                            FROM session_chunks_fts
+                            WHERE session_chunks_fts MATCH ?
+                            GROUP BY session_id
+                        ),
+                        best AS (
+                            SELECT session_id, MIN(rank) AS best_rank
+                            FROM combined
+                            GROUP BY session_id
+                        )
+                        SELECT
+                            s.session_id,
+                            s.title,
+                            s.created_at,
+                            s.updated_at,
+                            (SELECT COUNT(1) FROM session_messages m WHERE m.session_id = s.session_id) as message_count,
+                            b.best_rank AS rank
+                        FROM best b
+                        JOIN sessions s ON s.session_id = b.session_id
+                        ORDER BY b.best_rank ASC, s.updated_at DESC
+                        LIMIT ? OFFSET ?
+                        """,
+                        (like, like, q, int(limit), int(offset)),
+                    )
+                    rows = cur.fetchall()
+                    return [dict(r) for r in rows]
+                except Exception as e:
+                    logger.debug(f"Session search (FTS) failed; falling back to LIKE: {e}")
+
+            toks = _tokenize(q)[:6]
+            params: List[Any] = [like, like]
+
+            sql = """
+                WITH matched(session_id) AS (
+                    SELECT session_id FROM sessions WHERE (title LIKE ? OR session_id LIKE ?)
+            """
+
+            if toks:
+                like_clauses = " OR ".join(["content LIKE ?"] * len(toks))
+                sql += f"""
+                    UNION
+                    SELECT DISTINCT session_id FROM session_messages WHERE ({like_clauses})
+                """
+                params.extend([f"%{t}%" for t in toks])
+
+            sql += """
+                )
+                SELECT
+                    s.session_id,
+                    s.title,
+                    s.created_at,
+                    s.updated_at,
+                    (SELECT COUNT(1) FROM session_messages m WHERE m.session_id = s.session_id) as message_count
+                FROM matched x
+                JOIN sessions s ON s.session_id = x.session_id
+                ORDER BY s.updated_at DESC
+                LIMIT ? OFFSET ?
+            """
+            params.extend([int(limit), int(offset)])
+            cur.execute(sql, tuple(params))
+            return [dict(r) for r in cur.fetchall()]
+
     async def get_messages(self, session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         if not self.is_enabled or self._conn is None:
             return []

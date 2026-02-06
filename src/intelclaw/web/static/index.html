@@ -98,12 +98,25 @@
                     <span>Chat</span>
                 </div>
                 
-                <button class="session-selector" id="sessionSelector">
-                    <span id="currentSession">New Session</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="6 9 12 15 18 9"/>
-                    </svg>
-                </button>
+                <div class="session-picker" id="sessionPicker">
+                    <button class="session-selector" id="sessionSelector" type="button" aria-haspopup="true" aria-expanded="false">
+                        <span id="currentSession">New Session</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </button>
+
+                    <div class="session-dropdown hidden" id="sessionDropdown" role="menu" aria-hidden="true">
+                        <div class="session-dropdown-header">
+                            <input class="session-search" id="sessionSearchInput" type="text" placeholder="Search sessions" autocomplete="off" />
+                            <button class="session-new-btn" id="newSessionBtn" type="button">New</button>
+                        </div>
+                        <div class="session-dropdown-list" id="sessionDropdownList"></div>
+                        <div class="session-dropdown-footer">
+                            <button class="session-load-more-btn" id="loadMoreSessionsBtn" type="button">Load more</button>
+                        </div>
+                    </div>
+                </div>
                 
                 <div class="header-spacer"></div>
                 

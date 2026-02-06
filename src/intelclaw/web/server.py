@@ -399,12 +399,15 @@ class WebServer:
         # ==================== Sessions API ====================
 
         @self.fastapi.get("/api/sessions")
-        async def list_sessions(limit: int = 50, offset: int = 0):
+        async def list_sessions(limit: int = 50, offset: int = 0, q: Optional[str] = None):
             """List locally persisted chat sessions."""
             if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
                 store = self._app.memory.session_store
                 try:
-                    sessions = await store.list_sessions(limit=limit, offset=offset)
+                    if q:
+                        sessions = await store.search_sessions(str(q), limit=limit, offset=offset)
+                    else:
+                        sessions = await store.list_sessions(limit=limit, offset=offset)
                     return {"sessions": sessions, "count": len(sessions)}
                 except Exception as e:
                     logger.warning(f"Failed to list sessions: {e}")
@@ -437,11 +440,19 @@ class WebServer:
             if self._app and getattr(self._app, "memory", None) and getattr(self._app.memory, "session_store", None):
                 store = self._app.memory.session_store
                 try:
+                    info = await store.get_session_info(session_id)
                     msgs = await store.get_messages(session_id, limit=limit)
-                    return {"session_id": session_id, "messages": msgs, "count": len(msgs)}
+                    return {
+                        "session_id": session_id,
+                        "exists": info is not None,
+                        "title": (info or {}).get("title") or "",
+                        "message_count": (info or {}).get("message_count"),
+                        "messages": msgs,
+                        "count": len(msgs),
+                    }
                 except Exception as e:
                     logger.warning(f"Failed to get session messages: {e}")
-            return {"session_id": session_id, "messages": [], "count": 0}
+            return {"session_id": session_id, "exists": False, "title": "", "message_count": None, "messages": [], "count": 0}
 
         @self.fastapi.delete("/api/sessions/{session_id}")
         async def delete_session(session_id: str, confirm: bool = False):
@@ -615,12 +626,14 @@ class WebServer:
                     await self.manager.send_message({
                         "type": "chat_stream",
                         "delta": chunk,
-                        "model": self.current_model
+                        "model": self.current_model,
+                        "session_id": session_id,
                     }, websocket)
                 
                 await self.manager.send_message({
                     "type": "chat_complete",
                     "model": self.current_model,
+                    "session_id": session_id,
                     "timestamp": datetime.now().isoformat()
                 }, websocket)
             else:
@@ -640,6 +653,7 @@ class WebServer:
                     "type": "chat_response",
                     "content": response,
                     "model": self.current_model,
+                    "session_id": session_id,
                     "timestamp": datetime.now().isoformat()
                 }, websocket)
                 
@@ -649,7 +663,8 @@ class WebServer:
             traceback.print_exc()
             await self.manager.send_message({
                 "type": "error",
-                "message": str(e)
+                "message": str(e),
+                "session_id": session_id,
             }, websocket)
     
     async def _process_message(

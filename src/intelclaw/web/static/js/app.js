@@ -8,6 +8,21 @@ class IntelCLawApp {
         this.messages = [];
         this.currentSessionId = null;
         this.sessions = [];
+        this.sessionBusy = false;
+
+        // Session picker (header dropdown)
+        this.sessionPickerQuery = '';
+        this.sessionPickerOffset = 0;
+        this.sessionPickerLimit = 50;
+        this.sessionPickerSessions = [];
+        this.sessionPickerHasMore = false;
+        this.sessionPickerLoading = false;
+        this._sessionSearchDebounce = null;
+        this._sessionPickerLoadToken = 0;
+
+        // Avoid race conditions when switching sessions quickly
+        this._activeSessionLoadToken = 0;
+        this._sessionsRefreshTimer = null;
         this.settings = this._loadSettings();
         this.isTyping = false;
         this.currentStreamingMessage = null;
@@ -43,7 +58,19 @@ class IntelCLawApp {
         try {
             await this._loadSessions();
             if (this.sessions.length > 0) {
-                await this._switchToSession(this.sessions[0].session_id);
+                const desired = this._getDesiredSessionId();
+                if (desired) {
+                    const inList = this.sessions.find((s) => s.session_id === desired);
+                    if (inList) {
+                        await this._switchToSession(desired);
+                    } else {
+                        // Best-effort: allow switching to older sessions not in the first page.
+                        const found = await this._findSessionByQuery(desired);
+                        await this._switchToSession((found && found.session_id) ? found.session_id : this.sessions[0].session_id);
+                    }
+                } else {
+                    await this._switchToSession(this.sessions[0].session_id);
+                }
             } else {
                 await this._createNewSession();
             }
@@ -182,7 +209,13 @@ class IntelCLawApp {
             menuToggle: document.getElementById('menuToggle'),
             modelSelector: document.getElementById('modelSelector'),
             settingsToggle: document.getElementById('settingsToggle'),
+            sessionPicker: document.getElementById('sessionPicker'),
             sessionSelector: document.getElementById('sessionSelector'),
+            sessionDropdown: document.getElementById('sessionDropdown'),
+            sessionSearchInput: document.getElementById('sessionSearchInput'),
+            sessionDropdownList: document.getElementById('sessionDropdownList'),
+            loadMoreSessionsBtn: document.getElementById('loadMoreSessionsBtn'),
+            newSessionBtn: document.getElementById('newSessionBtn'),
             currentSession: document.getElementById('currentSession'),
             sessionList: document.getElementById('sessionList'),
             
@@ -229,6 +262,48 @@ class IntelCLawApp {
         
         // Model selector
         this.elements.modelSelector.addEventListener('change', (e) => this._handleModelChange(e));
+
+        // Session picker (header dropdown)
+        if (this.elements.sessionSelector) {
+            this.elements.sessionSelector.addEventListener('click', async (e) => {
+                e.preventDefault();
+                await this._toggleSessionDropdown();
+            });
+        }
+        if (this.elements.newSessionBtn) {
+            this.elements.newSessionBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                await this._createNewSession();
+                await this._toggleSessionDropdown(false);
+            });
+        }
+        if (this.elements.loadMoreSessionsBtn) {
+            this.elements.loadMoreSessionsBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                await this._loadSessionPickerPage({ append: true });
+            });
+        }
+        if (this.elements.sessionSearchInput) {
+            this.elements.sessionSearchInput.addEventListener('input', () => {
+                this._debounceSessionPickerSearch();
+            });
+        }
+
+        // Close session dropdown when clicking outside (or on ESC)
+        document.addEventListener('click', (e) => {
+            const picker = this.elements.sessionPicker;
+            const dropdown = this.elements.sessionDropdown;
+            if (!picker || !dropdown) return;
+            if (dropdown.classList.contains('hidden')) return;
+            if (!picker.contains(e.target)) {
+                this._toggleSessionDropdown(false);
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this._toggleSessionDropdown(false);
+            }
+        });
         
         // Navigation
         this.elements.navItems.forEach(item => {
@@ -271,9 +346,9 @@ class IntelCLawApp {
         });
         
         // New session handler
-        document.querySelector('[data-action="new-session"]')?.addEventListener('click', (e) => {
+        document.querySelector('[data-action="new-session"]')?.addEventListener('click', async (e) => {
             e.preventDefault();
-            this._createNewSession();
+            await this._createNewSession();
         });
     }
 
@@ -331,6 +406,11 @@ class IntelCLawApp {
      * Send a message to the agent
      */
     sendMessage() {
+        if (this.sessionBusy) return;
+        if (!this.currentSessionId) {
+            console.warn('[App] Cannot send message: no active session');
+            return;
+        }
         const content = this.elements.messageInput.value.trim();
         if (!content) return;
 
@@ -367,9 +447,9 @@ class IntelCLawApp {
     /**
      * Add a message to the chat UI
      */
-    _addMessage(message) {
+    _addMessage(message, options = {}) {
         this.messages.push(message);
-
+        
         const messageEl = document.createElement('div');
         messageEl.className = `message ${message.role}`;
         messageEl.dataset.id = message.id || Date.now();
@@ -405,7 +485,9 @@ class IntelCLawApp {
         `;
 
         this.elements.messagesContainer.appendChild(messageEl);
-        this._scrollToBottom();
+        if (!options || options.scroll !== false) {
+            this._scrollToBottom();
+        }
 
         return messageEl;
     }
@@ -494,6 +576,9 @@ class IntelCLawApp {
      * Handle chat response from server
      */
     _handleChatResponse(data) {
+        if (data && data.session_id && this.currentSessionId && data.session_id !== this.currentSessionId) {
+            return;
+        }
         this._hideTypingIndicator();
         
         this._addMessage({
@@ -502,12 +587,17 @@ class IntelCLawApp {
             model: data.model,
             timestamp: new Date().toISOString()
         });
+
+        this._scheduleSessionsRefresh();
     }
 
     /**
      * Handle streaming chat response
      */
     _handleChatStream(data) {
+        if (data && data.session_id && this.currentSessionId && data.session_id !== this.currentSessionId) {
+            return;
+        }
         if (!this.currentStreamingMessage) {
             this._hideTypingIndicator();
             
@@ -545,6 +635,9 @@ class IntelCLawApp {
      * Handle chat completion
      */
     _handleChatComplete(data) {
+        if (data && data.session_id && this.currentSessionId && data.session_id !== this.currentSessionId) {
+            return;
+        }
         this._hideTypingIndicator();
         
         if (this.currentStreamingMessage) {
@@ -558,6 +651,8 @@ class IntelCLawApp {
             this.currentStreamingMessage.element.removeAttribute('id');
             this.currentStreamingMessage = null;
         }
+
+        this._scheduleSessionsRefresh();
     }
 
     /**
@@ -616,6 +711,9 @@ class IntelCLawApp {
      * Handle error from server
      */
     _handleError(data) {
+        if (data && data.session_id && this.currentSessionId && data.session_id !== this.currentSessionId) {
+            return;
+        }
         this._hideTypingIndicator();
         
         this._addMessage({
@@ -623,6 +721,8 @@ class IntelCLawApp {
             content: `**Error:** ${data.message || 'An unexpected error occurred'}`,
             timestamp: new Date().toISOString()
         });
+
+        this._scheduleSessionsRefresh();
     }
 
     /**
@@ -1016,39 +1116,278 @@ class IntelCLawApp {
         }
     }
 
+    _setSessionBusy(busy) {
+        this.sessionBusy = !!busy;
+        if (this.elements.sendBtn) this.elements.sendBtn.disabled = this.sessionBusy;
+        if (this.elements.messageInput) this.elements.messageInput.disabled = this.sessionBusy;
+    }
+
+    _getDesiredSessionId() {
+        try {
+            const url = new URL(window.location.href);
+            const sid = url.searchParams.get('session_id');
+            if (sid && sid.trim()) return sid.trim();
+        } catch {
+            // ignore
+        }
+
+        try {
+            const sid = localStorage.getItem('intelclaw_last_session_id');
+            return sid && sid.trim() ? sid.trim() : null;
+        } catch {
+            return null;
+        }
+    }
+
+    _persistActiveSessionId(sessionId) {
+        try {
+            if (sessionId) {
+                localStorage.setItem('intelclaw_last_session_id', String(sessionId));
+            }
+        } catch {
+            // ignore
+        }
+    }
+
+    _setUrlSessionId(sessionId) {
+        try {
+            const url = new URL(window.location.href);
+            if (sessionId && String(sessionId).trim()) {
+                url.searchParams.set('session_id', String(sessionId).trim());
+            } else {
+                url.searchParams.delete('session_id');
+            }
+            window.history.replaceState({}, '', url.toString());
+        } catch {
+            // ignore
+        }
+    }
+
+    _isSessionDropdownOpen() {
+        return !!this.elements.sessionDropdown && !this.elements.sessionDropdown.classList.contains('hidden');
+    }
+
+    async _toggleSessionDropdown(show = null) {
+        const dropdown = this.elements.sessionDropdown;
+        const button = this.elements.sessionSelector;
+        if (!dropdown || !button) return;
+
+        const isOpen = !dropdown.classList.contains('hidden');
+        const open = show === null ? !isOpen : !!show;
+
+        if (!open) {
+            dropdown.classList.add('hidden');
+            dropdown.setAttribute('aria-hidden', 'true');
+            button.setAttribute('aria-expanded', 'false');
+            return;
+        }
+
+        dropdown.classList.remove('hidden');
+        dropdown.setAttribute('aria-hidden', 'false');
+        button.setAttribute('aria-expanded', 'true');
+
+        // Populate list on open.
+        await this._loadSessionPickerPage({ reset: true });
+
+        // Focus search input.
+        if (this.elements.sessionSearchInput) {
+            setTimeout(() => this.elements.sessionSearchInput.focus(), 0);
+        }
+    }
+
+    _debounceSessionPickerSearch() {
+        if (this._sessionSearchDebounce) {
+            clearTimeout(this._sessionSearchDebounce);
+        }
+        this._sessionSearchDebounce = setTimeout(() => {
+            this._loadSessionPickerPage({ reset: true });
+        }, 200);
+    }
+
+    async _loadSessionPickerPage({ reset = false, append = false } = {}) {
+        const listEl = this.elements.sessionDropdownList;
+        if (!listEl) return;
+        if (this.sessionPickerLoading) return;
+
+        const token = ++this._sessionPickerLoadToken;
+
+        this.sessionPickerLoading = true;
+        try {
+            const q = (this.elements.sessionSearchInput?.value || '').trim();
+            const queryChanged = q !== this.sessionPickerQuery;
+            if (reset || queryChanged) {
+                this.sessionPickerQuery = q;
+                this.sessionPickerOffset = 0;
+                this.sessionPickerSessions = [];
+                this.sessionPickerHasMore = false;
+            }
+
+            const limit = this.sessionPickerLimit;
+            const offset = append ? this.sessionPickerOffset : 0;
+            const url = q
+                ? `/api/sessions?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}&q=${encodeURIComponent(q)}`
+                : `/api/sessions?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
+
+            const resp = await fetch(url);
+            const data = await resp.json();
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+
+            if (token !== this._sessionPickerLoadToken) return;
+
+            if (append && this.sessionPickerSessions.length > 0) {
+                this.sessionPickerSessions = this.sessionPickerSessions.concat(sessions);
+            } else {
+                this.sessionPickerSessions = sessions;
+            }
+            this.sessionPickerOffset = this.sessionPickerSessions.length;
+            this.sessionPickerHasMore = sessions.length === limit;
+
+            this._renderSessionPickerList();
+        } catch (e) {
+            console.warn('[App] Failed to load session picker sessions:', e);
+        } finally {
+            if (token === this._sessionPickerLoadToken) {
+                this.sessionPickerLoading = false;
+                if (this.elements.loadMoreSessionsBtn) {
+                    this.elements.loadMoreSessionsBtn.disabled = !this.sessionPickerHasMore;
+                }
+            }
+        }
+    }
+
+    _renderSessionPickerList() {
+        const listEl = this.elements.sessionDropdownList;
+        if (!listEl) return;
+
+        listEl.innerHTML = '';
+
+        if (!this.sessionPickerSessions || this.sessionPickerSessions.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'session-dropdown-empty';
+            empty.textContent = 'No sessions found';
+            listEl.appendChild(empty);
+        } else {
+            this.sessionPickerSessions.forEach((s) => {
+                const sid = s.session_id;
+                const title = (s.title && s.title.trim()) ? s.title.trim() : sid;
+                const count = s.message_count ?? 0;
+
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'session-dropdown-item' + (sid === this.currentSessionId ? ' active' : '');
+                item.dataset.sessionId = sid;
+
+                const titleEl = document.createElement('div');
+                titleEl.className = 'session-dropdown-title';
+                titleEl.textContent = title;
+
+                const metaEl = document.createElement('div');
+                metaEl.className = 'session-dropdown-meta';
+                metaEl.textContent = `${count} msg${count === 1 ? '' : 's'}`;
+
+                item.appendChild(titleEl);
+                item.appendChild(metaEl);
+
+                item.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    await this._switchToSession(sid);
+                    await this._toggleSessionDropdown(false);
+                });
+
+                listEl.appendChild(item);
+            });
+        }
+
+        if (this.elements.loadMoreSessionsBtn) {
+            const show = !!this.sessionPickerHasMore;
+            this.elements.loadMoreSessionsBtn.style.display = show ? 'block' : 'none';
+            this.elements.loadMoreSessionsBtn.disabled = !show || this.sessionPickerLoading;
+        }
+    }
+
+    async _findSessionByQuery(query) {
+        const q = String(query || '').trim();
+        if (!q) return null;
+        try {
+            const resp = await fetch(`/api/sessions?limit=1&offset=0&q=${encodeURIComponent(q)}`);
+            const data = await resp.json();
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+            return sessions.length > 0 ? sessions[0] : null;
+        } catch {
+            return null;
+        }
+    }
+
+    _scheduleSessionsRefresh() {
+        if (this._sessionsRefreshTimer) return;
+        this._sessionsRefreshTimer = setTimeout(async () => {
+            this._sessionsRefreshTimer = null;
+            try {
+                await this._loadSessions();
+            } catch {
+                // ignore
+            }
+        }, 400);
+    }
+
     /**
      * Create new session
      */
     async _createNewSession() {
-        // Create on backend so it is persisted and shows up in the session list.
+        if (this.sessionBusy) return;
+        const token = ++this._activeSessionLoadToken;
+        this._setSessionBusy(true);
+
         try {
-            const resp = await fetch('/api/sessions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-            });
-            const data = await resp.json();
-            this.currentSessionId = data.session_id || ('session_' + Date.now());
-        } catch (e) {
-            console.warn('[App] Failed to create session via API, using fallback id:', e);
-            this.currentSessionId = 'session_' + Date.now();
+            // Create on backend so it is persisted and shows up in the session list.
+            try {
+                const resp = await fetch('/api/sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const data = await resp.json();
+                if (token !== this._activeSessionLoadToken) return;
+                this.currentSessionId = data.session_id || ('session_' + Date.now());
+            } catch (e) {
+                console.warn('[App] Failed to create session via API, using fallback id:', e);
+                if (token !== this._activeSessionLoadToken) return;
+                this.currentSessionId = 'session_' + Date.now();
+            }
+
+            if (token !== this._activeSessionLoadToken) return;
+
+            this._persistActiveSessionId(this.currentSessionId);
+            this._setUrlSessionId(this.currentSessionId);
+
+            this._hideTypingIndicator();
+            this.currentStreamingMessage = null;
+
+            this.messages = [];
+
+            // Clear messages UI
+            this.elements.messagesContainer.innerHTML = '';
+            this.elements.messagesContainer.appendChild(this.elements.emptyState);
+            this.elements.emptyState.classList.remove('hidden');
+
+            // Update session display
+            this.elements.currentSession.textContent = 'New Session';
+
+            // Notify backend (WebSocket current session)
+            this.ws.send('new_session', { session_id: this.currentSessionId });
+
+            await this._loadSessions();
+            this._renderSessionList();
+
+            // Keep session picker list fresh if it is open.
+            if (this._isSessionDropdownOpen()) {
+                await this._loadSessionPickerPage({ reset: true });
+            }
+        } finally {
+            if (token === this._activeSessionLoadToken) {
+                this._setSessionBusy(false);
+            }
         }
-
-        this.messages = [];
-        
-        // Clear messages UI
-        this.elements.messagesContainer.innerHTML = '';
-        this.elements.messagesContainer.appendChild(this.elements.emptyState);
-        this.elements.emptyState.classList.remove('hidden');
-        
-        // Update session display
-        this.elements.currentSession.textContent = 'New Session';
-        
-        // Notify backend (WebSocket current session)
-        this.ws.send('new_session', { session_id: this.currentSessionId });
-
-        await this._loadSessions();
-        this._renderSessionList();
     }
 
     /**
@@ -1094,40 +1433,69 @@ class IntelCLawApp {
      * Switch to an existing session and load its messages.
      */
     async _switchToSession(sessionId) {
-        if (!sessionId) return;
-        this.currentSessionId = sessionId;
-        this.ws.send('new_session', { session_id: this.currentSessionId });
+        const sid = String(sessionId || '').trim();
+        if (!sid) return;
 
-        // Load messages from backend
-        const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
-        const data = await resp.json();
-        const msgs = Array.isArray(data.messages) ? data.messages : [];
+        const token = ++this._activeSessionLoadToken;
+        this._setSessionBusy(true);
 
-        // Render
-        this.messages = [];
-        this.elements.messagesContainer.innerHTML = '';
-        this.elements.messagesContainer.appendChild(this.elements.emptyState);
+        try {
+            this.currentSessionId = sid;
+            this._persistActiveSessionId(this.currentSessionId);
+            this._setUrlSessionId(this.currentSessionId);
 
-        if (msgs.length === 0) {
-            this.elements.emptyState.classList.remove('hidden');
-        } else {
-            this.elements.emptyState.classList.add('hidden');
-            msgs.forEach((m) => {
-                this._addMessage({
-                    role: m.role,
-                    content: m.content,
-                    timestamp: m.created_at,
-                    id: m.id
+            this._hideTypingIndicator();
+            this.currentStreamingMessage = null;
+
+            this.ws.send('new_session', { session_id: this.currentSessionId });
+
+            // Load messages from backend
+            const resp = await fetch(`/api/sessions/${encodeURIComponent(sid)}`);
+            const data = await resp.json();
+            if (token !== this._activeSessionLoadToken) return;
+
+            const msgs = Array.isArray(data.messages) ? data.messages : [];
+
+            // Render
+            this.messages = [];
+            this.elements.messagesContainer.innerHTML = '';
+            this.elements.messagesContainer.appendChild(this.elements.emptyState);
+
+            if (msgs.length === 0) {
+                this.elements.emptyState.classList.remove('hidden');
+            } else {
+                this.elements.emptyState.classList.add('hidden');
+                msgs.forEach((m) => {
+                    this._addMessage(
+                        {
+                            role: m.role,
+                            content: m.content,
+                            timestamp: m.created_at,
+                            id: m.id
+                        },
+                        { scroll: false }
+                    );
                 });
-            });
+                this._scrollToBottom();
+            }
+
+            // Update session title in header (API preferred; fallback to list).
+            const titleFromApi = (data && typeof data.title === 'string') ? data.title.trim() : '';
+            const session = this.sessions.find((s) => s.session_id === sid);
+            const title = titleFromApi || ((session && session.title) ? session.title : sid);
+            this.elements.currentSession.textContent = title || 'Session';
+
+            this._renderSessionList();
+            if (this._isSessionDropdownOpen()) {
+                this._renderSessionPickerList();
+            }
+        } catch (e) {
+            console.warn('[App] Failed to switch session:', e);
+        } finally {
+            if (token === this._activeSessionLoadToken) {
+                this._setSessionBusy(false);
+            }
         }
-
-        // Update session title in header
-        const session = this.sessions.find((s) => s.session_id === sessionId);
-        const title = session && session.title ? session.title : 'Session';
-        this.elements.currentSession.textContent = title;
-
-        this._renderSessionList();
     }
 
     /**

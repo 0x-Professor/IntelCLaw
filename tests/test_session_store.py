@@ -75,8 +75,40 @@ async def test_session_store_retrieval_windows(tmp_path):
     await store.shutdown()
 
 
+@pytest.mark.asyncio
+async def test_session_store_search_sessions(tmp_path):
+    cfg = SessionStoreConfig(
+        db_path=str(tmp_path / "sessions.db"),
+        embeddings={"provider": "hash", "dimension": 64},
+        redaction_mode="redact",
+        exclude_last_n_messages=0,
+    )
+
+    store = SessionStore(cfg)
+    await store.initialize()
+
+    sid1 = await store.create_session(title="Alpha contract review")
+    await store.add_message(sid1, role="user", content="We discussed indemnification clauses yesterday.")
+
+    sid2 = await store.create_session(title="Banana talk")
+    await store.add_message(sid2, role="user", content="I love bananas.")
+
+    # Title search should work in all environments (FTS or not).
+    r1 = await store.search_sessions("Banana", limit=10, offset=0)
+    assert any(r["session_id"] == sid2 for r in r1)
+
+    r2 = await store.search_sessions("Alpha", limit=10, offset=0)
+    assert any(r["session_id"] == sid1 for r in r2)
+
+    # Content search works when FTS5 is available; skip otherwise.
+    if getattr(store, "_fts_available", False):
+        r3 = await store.search_sessions("indemnification", limit=10, offset=0)
+        assert any(r["session_id"] == sid1 for r in r3)
+
+    await store.shutdown()
+
+
 def test_embeddings_fallback_to_local_hash(monkeypatch):
     monkeypatch.delenv("JINA_API_KEY", raising=False)
     emb = embeddings_from_config({"provider": "jina", "model": "jina-embeddings-v3"})
     assert getattr(emb, "name", "") == "local_hash"
-
