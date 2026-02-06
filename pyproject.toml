@@ -37,6 +37,7 @@ dependencies = [
     "mem0ai>=0.1.0",
     "chromadb>=0.5.0",
     "qdrant-client>=1.11.0",
+    "pageindex>=0.2.5",
     # === Windows System Integration ===
     "pywin32>=306",
     "pywinauto>=0.6.8",

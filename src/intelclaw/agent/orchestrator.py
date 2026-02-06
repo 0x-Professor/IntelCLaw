@@ -38,6 +38,7 @@ from intelclaw.agent.base import (
 from intelclaw.agent.router import IntentRouter
 from intelclaw.agent.task_planner import TaskPlanner, TaskPlan, TaskStep, TaskStatus as PlanTaskStatus, TaskQueue, QueuedTask, TaskPriority
 from intelclaw.integrations.llm_provider import LLMProvider
+from intelclaw.security.redaction import contains_secret
 
 if TYPE_CHECKING:
     from intelclaw.config.manager import ConfigManager
@@ -589,6 +590,13 @@ class AgentOrchestrator(BaseAgent):
         }
         tasks: List[tuple[str, Any]] = []
 
+        available_tool_names: Optional[set[str]] = None
+        if self.tools:
+            try:
+                available_tool_names = {d.name for d in self.tools.list_tools()}
+            except Exception:
+                available_tool_names = None
+
         if self.memory and hasattr(self.memory, 'get_rag_context'):
             tasks.append((
                 "rag_context",
@@ -597,6 +605,7 @@ class AgentOrchestrator(BaseAgent):
                     include_persona=True,
                     include_session=True,
                     max_context_chars=5000,
+                    available_tool_names=available_tool_names,
                 ),
             ))
 
@@ -2170,46 +2179,187 @@ Be conversational and natural in your response."""
         agent_response: str
     ) -> None:
         """
-        Extract user preferences from conversation and store in Mem0.
-        
-        This enables the agent to learn and remember:
-        - User's preferred coding style, language preferences
-        - Common tools and workflows the user uses
-        - User's communication preferences
-        - Important information shared by the user
+        Extract and store preferences/important memories into long-term memory (local by default).
+
+        This enables the agent to remember:
+        - Preferences (language, style, tools)
+        - Stable user facts (name, role, timezone, etc.)
+
+        Secrets are never persisted.
         """
-        if not self.memory or not hasattr(self.memory, 'agentic_rag'):
+        if not self.memory:
             return
-        
-        rag = self.memory.agentic_rag
-        if not rag or not rag._mem0:
+
+        msg = (user_message or "").strip()
+        if not msg:
             return
-        
-        # Keywords that indicate user preferences
+
+        # Never persist secrets (skip early to avoid extra work).
+        if contains_secret(msg) or contains_secret(agent_response or ""):
+            return
+
+        message_lower = msg.lower()
+
         preference_indicators = [
-            "i prefer", "i like", "always use", "i want", "my favorite",
-            "i usually", "i always", "please use", "don't use", "never use",
-            "i work with", "my name is", "call me", "i'm a", "i am a",
-            "my project", "i code in", "my style", "i need"
+            "i prefer",
+            "i like",
+            "always use",
+            "i want",
+            "my favorite",
+            "i usually",
+            "i always",
+            "please use",
+            "don't use",
+            "never use",
+            "my name is",
+            "call me",
+            "i'm a",
+            "i am a",
+            "my project",
+            "i code in",
+            "my style",
+            "timezone",
+            "language",
         ]
-        
-        message_lower = user_message.lower()
-        
-        # Check if message contains preference indicators
-        for indicator in preference_indicators:
-            if indicator in message_lower:
-                # Store this as a user preference
-                try:
-                    await rag._mem0_add(
-                        f"User stated: {user_message}",
+
+        profile_like = bool(
+            re.search(r"(?im)^(name|email|timezone|location|role|occupation|language)\\s*:", msg)
+        )
+        should_extract = profile_like or any(ind in message_lower for ind in preference_indicators)
+        if not should_extract:
+            return
+
+        # If no LLM is available, store a minimal heuristic preference memory.
+        if not self._llm:
+            for indicator in preference_indicators:
+                if indicator in message_lower:
+                    await self.memory.store_memory(
+                        f"{indicator}: {msg[:500]}",
                         metadata={
+                            "kind": "user_preference",
                             "type": "user_preference",
                             "indicator": indicator,
                             "timestamp": datetime.now().isoformat(),
-                            "context": agent_response[:200]  # Include some response context
-                        }
+                            "importance": 0.7,
+                        },
                     )
-                    logger.debug(f"Stored user preference (indicator: {indicator})")
-                except Exception as e:
-                    logger.debug(f"Failed to store preference: {e}")
-                break  # Only store once per message
+                    return
+            return
+
+        system = (
+            "You extract user preferences and durable memories from chat.\n"
+            "Return STRICT JSON only (no markdown). Schema:\n"
+            "{\n"
+            '  \"preferences\": [{\"type\": str, \"value\": str, \"confidence\": number, \"context\": str}],\n'
+            '  \"memories\": [{\"kind\": str, \"content\": str, \"importance\": number, \"tags\": [str]}]\n'
+            "}\n"
+            "Rules:\n"
+            "- Only include durable, reusable info.\n"
+            "- Never include secrets, tokens, passwords, API keys.\n"
+            "- If nothing to store, return {\"preferences\": [], \"memories\": []}."
+        )
+
+        payload = (
+            f"User message:\n{msg}\n\n"
+            f"Assistant response (for context):\n{(agent_response or '')[:2000]}\n"
+        )
+
+        try:
+            llm = self._llm
+            try:
+                if hasattr(llm, "bind"):
+                    llm = llm.bind(temperature=0)  # type: ignore[assignment]
+            except Exception:
+                pass
+
+            resp = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=payload)])
+            raw = resp.content if hasattr(resp, "content") else str(resp)
+        except Exception as e:
+            logger.debug(f"Preference extraction LLM call failed: {e}")
+            return
+
+        data: Optional[Dict[str, Any]] = None
+        try:
+            data = json.loads(raw)
+        except Exception:
+            # Try to salvage JSON from text
+            try:
+                start = raw.find("{")
+                end = raw.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    data = json.loads(raw[start : end + 1])
+            except Exception:
+                data = None
+
+        if not isinstance(data, dict):
+            return
+
+        preferences = data.get("preferences") or []
+        memories = data.get("memories") or []
+        if not isinstance(preferences, list):
+            preferences = []
+        if not isinstance(memories, list):
+            memories = []
+
+        stored_prefs = 0
+        stored_mems = 0
+        now = datetime.now().isoformat()
+
+        for p in preferences[:5]:
+            if not isinstance(p, dict):
+                continue
+            ptype = str(p.get("type") or "preference").strip()
+            value = str(p.get("value") or "").strip()
+            context_text = str(p.get("context") or "").strip()
+            try:
+                confidence = float(p.get("confidence", 0.7))
+            except Exception:
+                confidence = 0.7
+
+            if not value or contains_secret(value) or contains_secret(context_text):
+                continue
+
+            await self.memory.store_memory(
+                f"{ptype}: {value}",
+                metadata={
+                    "kind": "user_preference",
+                    "type": "user_preference",
+                    "preference_type": ptype,
+                    "confidence": max(0.0, min(confidence, 1.0)),
+                    "context": context_text[:500],
+                    "timestamp": now,
+                    "importance": max(0.4, min(0.95, 0.6 + 0.4 * confidence)),
+                    "source": "preference_extraction",
+                },
+            )
+            stored_prefs += 1
+
+        for m in memories[:5]:
+            if not isinstance(m, dict):
+                continue
+            kind = str(m.get("kind") or "fact").strip()
+            content = str(m.get("content") or "").strip()
+            tags = m.get("tags") if isinstance(m.get("tags"), list) else []
+            try:
+                importance = float(m.get("importance", 0.6))
+            except Exception:
+                importance = 0.6
+
+            if not content or contains_secret(content):
+                continue
+
+            await self.memory.store_memory(
+                content[:2000],
+                metadata={
+                    "kind": kind,
+                    "type": kind,
+                    "tags": [str(t) for t in tags][:8],
+                    "timestamp": now,
+                    "importance": max(0.0, min(importance, 1.0)),
+                    "source": "memory_extraction",
+                },
+            )
+            stored_mems += 1
+
+        if stored_prefs or stored_mems:
+            logger.debug(f"Stored preferences={stored_prefs}, memories={stored_mems} to long-term memory")

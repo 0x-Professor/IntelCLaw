@@ -6,6 +6,7 @@ Coordinates short-term, working, and long-term memory.
 
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from loguru import logger
@@ -15,6 +16,7 @@ from intelclaw.memory.working_memory import WorkingMemory
 from intelclaw.memory.long_term import LongTermMemory
 from intelclaw.memory.vector_store import VectorStore
 from intelclaw.memory.agentic_rag import AgenticRAG
+from intelclaw.memory.pageindex_watcher import PageIndexWatcher, PageIndexWatcherConfig, WATCHDOG_AVAILABLE, _normalize_exts
 
 if TYPE_CHECKING:
     from intelclaw.config.manager import ConfigManager
@@ -66,6 +68,9 @@ class MemoryManager:
         
         # Agentic RAG system (reasoning-based retrieval)
         self.agentic_rag: Optional[AgenticRAG] = None
+
+        # PageIndex auto-ingest watcher (optional)
+        self.pageindex_watcher: Optional[PageIndexWatcher] = None
         
         self._initialized = False
         
@@ -104,17 +109,49 @@ class MemoryManager:
         
         # Initialize Agentic RAG system (reasoning-based retrieval)
         rag_config = memory_config.get("agentic_rag", {})
+        if isinstance(rag_config, dict) and isinstance(memory_config, dict):
+            rag_config = {
+                **rag_config,
+                "pageindex": memory_config.get("pageindex", {}),
+                "redaction": memory_config.get("redaction", {}),
+            }
         self.agentic_rag = AgenticRAG(
             user_id=memory_config.get("user_id", "default"),
             persist_dir=rag_config.get("path", "data/agentic_rag"),
+            vector_store=self.vector_store,
+            long_term=self.long_term,
         )
         await self.agentic_rag.initialize(rag_config)
         
         # Index persona files for context-aware retrieval
-        from pathlib import Path
         persona_dir = Path(__file__).parent.parent.parent.parent / "persona"
         if persona_dir.exists():
             await self.agentic_rag.index_persona(persona_dir)
+
+        # Optional: watch a folder and auto-index PDFs via PageIndex
+        pageindex_cfg = memory_config.get("pageindex", {}) if isinstance(memory_config, dict) else {}
+        if (
+            self.agentic_rag
+            and pageindex_cfg.get("enabled", True)
+            and pageindex_cfg.get("watch", True)
+            and WATCHDOG_AVAILABLE
+        ):
+            ingest_folder = Path(pageindex_cfg.get("ingest_folder", "data/pageindex_inbox"))
+            exts = _normalize_exts(pageindex_cfg.get("extensions", [".pdf"]))
+            watcher_cfg = PageIndexWatcherConfig(
+                ingest_folder=ingest_folder,
+                extensions=exts,
+                debounce_seconds=float(pageindex_cfg.get("debounce_seconds", 1.0)),
+            )
+
+            async def _on_file(path: Path) -> None:
+                if not self.agentic_rag:
+                    return
+                # Implemented on AgenticRAG; watcher is best-effort.
+                await self.agentic_rag.index_path(path)
+
+            self.pageindex_watcher = PageIndexWatcher(watcher_cfg, _on_file)
+            await self.pageindex_watcher.start(scan_on_startup=True)
         
         self._initialized = True
         logger.success("Memory system initialized")
@@ -122,6 +159,13 @@ class MemoryManager:
     async def shutdown(self) -> None:
         """Shutdown all memory tiers."""
         logger.info("Shutting down memory system...")
+
+        if self.pageindex_watcher:
+            try:
+                await self.pageindex_watcher.stop()
+            except Exception as e:
+                logger.debug(f"Failed to stop PageIndex watcher: {e}")
+            self.pageindex_watcher = None
         
         if self.agentic_rag:
             await self.agentic_rag.shutdown()
@@ -330,7 +374,8 @@ class MemoryManager:
         query: str,
         include_persona: bool = True,
         include_session: bool = True,
-        max_context_chars: int = 10000
+        max_context_chars: int = 10000,
+        available_tool_names: Optional[set[str]] = None,
     ) -> str:
         """
         Get comprehensive RAG context using reasoning-based retrieval.
@@ -352,7 +397,8 @@ class MemoryManager:
                 query=query,
                 include_persona=include_persona,
                 include_session=include_session,
-                max_context_chars=max_context_chars
+                max_context_chars=max_context_chars,
+                available_tool_names=available_tool_names,
             )
         return ""
     

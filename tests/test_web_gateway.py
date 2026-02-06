@@ -19,6 +19,16 @@ Or run specific tests:
     uv run python tests/test_web_gateway.py --test tools
 """
 
+# NOTE: This is an integration harness intended to be run directly (see Usage above).
+# Pytest collection will fail because this script expects runtime CLI args/fixtures.
+if __name__ != "__main__":
+    import pytest
+
+    pytest.skip(
+        "Integration harness; run `uv run python tests/test_web_gateway.py` instead of pytest collection.",
+        allow_module_level=True,
+    )
+
 import asyncio
 import json
 import sys

@@ -12,7 +12,8 @@
 
 - **🤖 REACT Agent Architecture**: Multi-agent system using LangChain/LangGraph with ReAct (Reasoning + Acting) pattern
 - **👁️ Screen Understanding**: Real-time screen capture, OCR, and UI element recognition
-- **🧠 Persistent Memory**: Multi-tier memory with Mem0 cloud integration and ChromaDB vector store
+- **🧠 Persistent Memory**: Local long-term memory (SQLite) with safe secret redaction (Mem0 optional)
+- **📄 PDF RAG (PageIndex)**: Auto-ingest PDFs and retrieve relevant nodes from cached document trees
 - **🎯 Task Automation**: Execute complex multi-step workflows autonomously
 - **🔍 Intelligent Search**: Web search (Tavily), file search, and semantic RAG retrieval
 - **📁 File Operations**: Read, write, search files with smart encoding detection and backup support
@@ -31,7 +32,7 @@
 - **Python**: 3.11 or higher
 - **Package Manager**: [uv](https://github.com/astral-sh/uv) (recommended) or pip
 - **Tesseract OCR**: For screen text recognition
-- **API Keys**: OpenAI (required), Tavily (optional)
+- **API Keys**: OpenAI (required), Tavily (optional), PageIndex (optional for PDF RAG)
 
 ---
 
@@ -70,7 +71,10 @@ Optional:
 TAVILY_API_KEY=tvly-your-tavily-key
 ANTHROPIC_API_KEY=sk-ant-your-anthropic-key
 GITHUB_TOKEN=ghp_your-github-token
+PAGEINDEX_API_KEY=your-pageindex-key
 ```
+
+> Security note: If you pasted an API key into chat/logs, treat it as compromised and rotate it in the provider dashboard.
 
 ### 4. Install Dependencies
 
@@ -265,6 +269,16 @@ hotkeys:
   summon: ctrl+shift+space
   quick_action: ctrl+shift+q
 ```
+
+---
+
+## 📄 PageIndex PDF RAG (Auto-Watch)
+
+If `PAGEINDEX_API_KEY` is set, IntelCLaw can ingest PDFs via PageIndex and cache a document tree locally for fast query-time retrieval.
+
+- Drop PDFs into: `data/pageindex_inbox/` (configurable via `memory.pageindex.ingest_folder`)
+- Cached trees + registry live under: `data/pageindex/`
+- Index on-demand via the `rag_index_path` tool (see `persona/TOOLS.md`)
 
 ---
 

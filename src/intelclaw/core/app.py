@@ -8,19 +8,9 @@ import asyncio
 import signal
 import sys
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from loguru import logger
-
-# Qt imports for event loop integration
-try:
-    from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtCore import QTimer
-    import qasync
-    PYQT_AVAILABLE = True
-except ImportError:
-    PYQT_AVAILABLE = False
-    qasync = None
 
 from intelclaw.core.events import EventBus
 from intelclaw.config.manager import ConfigManager
@@ -30,10 +20,12 @@ from intelclaw.memory.manager import MemoryManager
 from intelclaw.memory.data_store import DataStore
 from intelclaw.perception.manager import PerceptionManager
 from intelclaw.tools.registry import ToolRegistry
-from intelclaw.ui.overlay import OverlayWindow
-from intelclaw.ui.system_tray import SystemTray
 from intelclaw.security.manager import SecurityManager
 from intelclaw.integrations.copilot import CopilotIntegration, ModelManager
+
+if TYPE_CHECKING:
+    from intelclaw.ui.overlay import OverlayWindow
+    from intelclaw.ui.system_tray import SystemTray
 
 
 class IntelCLawApp:
@@ -62,8 +54,8 @@ class IntelCLawApp:
         self.perception: Optional[PerceptionManager] = None
         self.tools: Optional[ToolRegistry] = None
         self.agent: Optional[AgentOrchestrator] = None
-        self.overlay: Optional[OverlayWindow] = None
-        self.tray: Optional[SystemTray] = None
+        self.overlay: Optional["OverlayWindow"] = None
+        self.tray: Optional["SystemTray"] = None
         
         # Autonomous capabilities
         self.self_improvement: Optional[SelfImprovement] = None
@@ -104,7 +96,7 @@ class IntelCLawApp:
         logger.info("Perception layer initialized")
         
         # 5. Initialize tool registry
-        self.tools = ToolRegistry(self.config, self.security)
+        self.tools = ToolRegistry(self.config, self.security, memory=self.memory)
         await self.tools.initialize()
         logger.info("Tool registry initialized")
         
@@ -133,6 +125,10 @@ class IntelCLawApp:
         # 7. Initialize UI components (skip in web mode)
         import os
         if not os.environ.get("INTELCLAW_NO_QT"):
+            # Import UI modules lazily to avoid loading PyQt6 before memory/vector indexing.
+            from intelclaw.ui.overlay import OverlayWindow
+            from intelclaw.ui.system_tray import SystemTray
+
             self.tray = SystemTray(self)
             self.overlay = OverlayWindow(self)
             logger.info("UI components initialized")

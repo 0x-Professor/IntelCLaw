@@ -16,6 +16,7 @@ from intelclaw.tools.converter import convert_tools_to_openai, convert_tools_to_
 
 if TYPE_CHECKING:
     from intelclaw.config.manager import ConfigManager
+    from intelclaw.memory.manager import MemoryManager
     from intelclaw.security.manager import SecurityManager
 
 
@@ -35,6 +36,7 @@ class ToolRegistry:
         self,
         config: "ConfigManager",
         security: "SecurityManager",
+        memory: Optional["MemoryManager"] = None,
     ):
         """
         Initialize tool registry.
@@ -45,6 +47,7 @@ class ToolRegistry:
         """
         self.config = config
         self.security = security
+        self.memory = memory
         
         self._tools: Dict[str, BaseTool] = {}
         self._definitions: Dict[str, ToolDefinition] = {}
@@ -426,6 +429,11 @@ class ToolRegistry:
             SystemPerformanceTool,
             UserSecurityTool,
         )
+        from intelclaw.tools.builtin.rag import (
+            RagIndexPathTool,
+            RagListDocumentsTool,
+            RagDeleteDocumentTool,
+        )
         
         builtin_tools = [
             # Search tools
@@ -469,6 +477,15 @@ class ToolRegistry:
             SystemPerformanceTool(),
             UserSecurityTool(),
         ]
+
+        # RAG ingestion tools (require MemoryManager)
+        builtin_tools.extend(
+            [
+                RagIndexPathTool(memory=self.memory),
+                RagListDocumentsTool(memory=self.memory),
+                RagDeleteDocumentTool(memory=self.memory),
+            ]
+        )
         
         for tool in builtin_tools:
             self.register(tool)

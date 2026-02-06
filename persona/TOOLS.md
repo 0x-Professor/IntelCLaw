@@ -120,6 +120,30 @@ web_scrape(url: str, extract_text: bool = True) -> WebContent
 ```
 Fetch and extract content from a web page.
 
+### 🧠 RAG & Memory Tools
+
+#### Index Local Path (PDF/Markdown/Text)
+```
+rag_index_path(path: str, title: str | None = None, tags: list[str] | None = None) -> RagIndexResult
+```
+Index a local file for retrieval:
+- `.pdf` files are uploaded to PageIndex and a document tree is cached locally.
+- `.md`/`.txt` files are indexed locally via hierarchical markdown parsing.
+
+#### List Indexed Documents
+```
+rag_list_documents() -> List[DocumentInfo]
+```
+List documents currently indexed for retrieval (includes PageIndex PDFs and local file docs; persona docs are excluded by default).
+
+#### Delete Indexed Document
+```
+rag_delete_document(doc_id: str, confirm: bool = False, delete_remote: bool = False) -> Result
+```
+Delete an indexed document by `doc_id`.
+- Requires `confirm=true` to proceed.
+- If `delete_remote=true` and the doc is PageIndex-backed, it will also delete the remote PageIndex document.
+
 ---
 
 ## 🪟 Windows Native Tools

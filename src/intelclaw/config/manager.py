@@ -61,6 +61,27 @@ class ConfigManager:
                 "collection": "intelclaw",
                 "path": "data/vector_db",
             },
+            "long_term": {
+                "backend": "local",
+                "db_path": "data/long_term_memory.db",
+            },
+            "pageindex": {
+                "enabled": True,
+                "watch": True,
+                "ingest_folder": "data/pageindex_inbox",
+                "extensions": [".pdf"],
+                "poll_seconds": 5,
+                "tree_timeout_seconds": 900,
+                "max_docs_per_query": 3,
+                "max_nodes_per_doc": 3,
+            },
+            "agentic_rag": {
+                "path": "data/agentic_rag",
+                "max_nodes_per_doc": 3,
+            },
+            "redaction": {
+                "on_detect": "skip",  # "skip" or "redact"
+            },
             "retention_days": 365,
             "auto_cleanup": True,
         },
@@ -127,6 +148,14 @@ class ConfigManager:
         """Load configuration from file."""
         # Start with defaults
         self._config = self._deep_copy(self.DEFAULT_CONFIG)
+
+        # Load environment variables from .env early (best-effort)
+        try:
+            from dotenv import load_dotenv  # type: ignore
+
+            load_dotenv()
+        except Exception:
+            pass
         
         # Load from file if exists
         if self._config_path.exists():

@@ -360,16 +360,16 @@ class WebServer:
             tool_list = []
             
             try:
-                # Try to get tools from the registry
-                from intelclaw.tools.registry import ToolRegistry
-                registry = ToolRegistry()
-                for name, tool in registry.get_all().items():
-                    tool_info = {
-                        "name": name,
-                        "description": getattr(tool, 'description', ''),
-                        "category": getattr(tool, 'category', 'general'),
-                    }
-                    tool_list.append(tool_info)
+                if self._app and getattr(self._app, "tools", None):
+                    registry = self._app.tools
+                    for d in registry.list_tools():
+                        tool_list.append(
+                            {
+                                "name": d.name,
+                                "description": d.description,
+                                "category": getattr(d.category, "value", str(d.category)),
+                            }
+                        )
             except Exception as e:
                 logger.debug(f"Could not load tools from registry: {e}")
                 # Return built-in tools as fallback
