@@ -60,6 +60,9 @@ class AgentState(TypedDict):
     consecutive_errors: int
     needs_replan: bool
     last_tool_error: Optional[str]
+    tool_cache: Dict[str, str]
+    tool_call_counts: Dict[str, int]
+    force_no_tool: bool
 
 
 class AgentOrchestrator(BaseAgent):
@@ -1054,7 +1057,7 @@ class AgentOrchestrator(BaseAgent):
         messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
         
         # Get LLM response with tool binding
-        if self._langchain_tools:
+        if self._langchain_tools and not state.get("force_no_tool"):
             # On the first iteration, if the query clearly requires tool use,
             # force the LLM to call a tool instead of responding with text
             tool_choice = "auto"
@@ -1072,6 +1075,8 @@ class AgentOrchestrator(BaseAgent):
             llm_with_tools = self._llm.bind_tools(self._langchain_tools, tool_choice=tool_choice)
             response = await llm_with_tools.ainvoke(messages)
         else:
+            if state.get("force_no_tool"):
+                logger.info("Forcing no-tool response due to repeated tool call")
             response = await self._llm.ainvoke(messages)
         
         # Record thought
@@ -1111,6 +1116,9 @@ class AgentOrchestrator(BaseAgent):
         tools_used = list(state["tools_used"])
         consecutive_errors = state.get("consecutive_errors", 0)
         last_tool_error = state.get("last_tool_error")
+        tool_cache = dict(state.get("tool_cache") or {})
+        tool_call_counts = dict(state.get("tool_call_counts") or {})
+        force_no_tool = state.get("force_no_tool", False)
         
         tool_calls = list(last_message.tool_calls)
         if self._max_tool_calls_per_iteration and len(tool_calls) > self._max_tool_calls_per_iteration:
@@ -1140,9 +1148,14 @@ class AgentOrchestrator(BaseAgent):
             
             if not tool_call_id:
                 tool_call_id = f"call_{time.time_ns()}"
-            
+
             logger.debug(f"Executing tool: {tool_name}")
             tools_used.append(tool_name)
+
+            signature = self._tool_signature(tool_name, tool_args)
+            tool_call_counts[signature] = tool_call_counts.get(signature, 0) + 1
+            if tool_call_counts[signature] > 1:
+                force_no_tool = True
             
             await self._emit_event("tool.call", {
                 "id": tool_call_id,
@@ -1150,8 +1163,14 @@ class AgentOrchestrator(BaseAgent):
                 "args": tool_args,
             })
             
-            # Execute the tool
-            result = await self._execute_tool(tool_name, tool_args)
+            # Execute the tool (dedupe identical calls in the same request)
+            cached_result = tool_cache.get(signature)
+            if cached_result is not None:
+                result = cached_result
+                logger.info(f"Using cached result for tool '{tool_name}'")
+            else:
+                result = await self._execute_tool(tool_name, tool_args)
+                tool_cache[signature] = result
             
             result_text = str(result)
             if result_text.lower().startswith("error"):
@@ -1189,6 +1208,9 @@ class AgentOrchestrator(BaseAgent):
             "tools_used": tools_used,
             "consecutive_errors": consecutive_errors,
             "last_tool_error": last_tool_error,
+            "tool_cache": tool_cache,
+            "tool_call_counts": tool_call_counts,
+            "force_no_tool": force_no_tool,
         }
     
     async def _reflect_node(self, state: AgentState) -> AgentState:
@@ -1305,6 +1327,15 @@ class AgentOrchestrator(BaseAgent):
                 self._conversation_history.append(msg)
         if len(self._conversation_history) > self._max_history:
             self._conversation_history = self._conversation_history[-self._max_history:]
+
+    @staticmethod
+    def _tool_signature(tool_name: str, tool_args: Dict[str, Any]) -> str:
+        """Create a stable signature for tool deduplication."""
+        try:
+            args_json = json.dumps(tool_args or {}, sort_keys=True, default=str)
+        except Exception:
+            args_json = str(tool_args)
+        return f"{tool_name}|{args_json}"
     
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
         """Execute a tool through the registry."""
@@ -1929,6 +1960,9 @@ Be conversational and natural in your response."""
             "consecutive_errors": 0,
             "needs_replan": False,
             "last_tool_error": None,
+            "tool_cache": {},
+            "tool_call_counts": {},
+            "force_no_tool": False,
         }
         
         try:

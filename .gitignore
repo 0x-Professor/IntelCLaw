@@ -9,6 +9,11 @@ wheels/
 # Virtual environments
 .venv
 .env
-/logs
-/data
+
+# Logs
+logs/
+
+# Data
+data/
+
 
