@@ -220,7 +220,7 @@ class IntelCLawApp:
             except Exception as e:
                 logger.error(f"Health check error: {e}")
     
-    async def process_user_input(self, message: str) -> str:
+    async def process_user_input(self, message: str, *, session_id: str = "overlay") -> str:
         """
         Process user input through the agent.
         
@@ -247,13 +247,13 @@ class IntelCLawApp:
                 "active_window_title": perception_context.get("active_window_title"),
             }
         
-        conversation_history = (
-            self.memory.get_conversation_history(limit=10) if self.memory else []
-        )
+        # Conversation history is loaded per-session by the orchestrator (SessionStore),
+        # so we avoid passing global in-memory history here to prevent cross-session mixing.
+        conversation_history = []
         
         agent_context = AgentContext(
             user_message=message,
-            session_id="overlay",
+            session_id=str(session_id or "").strip() or "overlay",
             conversation_history=conversation_history,
             screen_context=screen_context,
             active_window=perception_context.get("active_window") if perception_context else None,

@@ -12,7 +12,7 @@ from loguru import logger
 try:
     from PyQt6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-        QTextEdit, QLineEdit, QPushButton, QLabel, QScrollArea, QFrame
+        QTextEdit, QLineEdit, QPushButton, QLabel, QScrollArea, QFrame, QComboBox
     )
     from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
     from PyQt6.QtGui import QFont, QColor, QPalette, QKeySequence, QShortcut
@@ -127,16 +127,23 @@ if PYQT_AVAILABLE:
     class TransparentOverlay(QMainWindow):
         """PyQt6 transparent overlay window."""
         
-        response_received = pyqtSignal(str)
+        response_received = pyqtSignal(str, str)
         
         def __init__(self, app: "IntelCLawApp"):
             super().__init__()
             self._app = app
+            self._active_session_id: Optional[str] = None
             self._setup_ui()
             self._setup_style()
             
             # Connect signal
             self.response_received.connect(self._display_response)
+
+            # Load sessions on startup (best-effort)
+            try:
+                asyncio.create_task(self._refresh_sessions())
+            except Exception:
+                pass
         
         def _setup_ui(self) -> None:
             """Set up the UI components."""
@@ -176,6 +183,35 @@ if PYQT_AVAILABLE:
             header.addWidget(close_btn)
             
             layout.addLayout(header)
+
+            # Sessions row
+            session_row = QHBoxLayout()
+            session_row.setSpacing(8)
+
+            session_label = QLabel("Session")
+            session_label.setObjectName("sessionLabel")
+            session_row.addWidget(session_label)
+
+            self.session_combo = QComboBox()
+            self.session_combo.setObjectName("sessionCombo")
+            self.session_combo.setMinimumWidth(280)
+            self.session_combo.setEnabled(False)
+            self.session_combo.currentIndexChanged.connect(self._on_session_selection_changed)
+            session_row.addWidget(self.session_combo, stretch=1)
+
+            refresh_btn = QPushButton("⟳")
+            refresh_btn.setObjectName("refreshSessionsButton")
+            refresh_btn.setFixedSize(34, 28)
+            refresh_btn.clicked.connect(lambda: asyncio.create_task(self._refresh_sessions()))
+            session_row.addWidget(refresh_btn)
+
+            new_btn = QPushButton("New")
+            new_btn.setObjectName("newSessionButton")
+            new_btn.setFixedHeight(28)
+            new_btn.clicked.connect(lambda: asyncio.create_task(self._create_new_session()))
+            session_row.addWidget(new_btn)
+
+            layout.addLayout(session_row)
             
             # Chat area
             self.chat_display = QTextEdit()
@@ -204,6 +240,158 @@ if PYQT_AVAILABLE:
             self.status_label = QLabel("Ready")
             self.status_label.setObjectName("statusLabel")
             layout.addWidget(self.status_label)
+
+        def _get_session_store(self):
+            try:
+                memory = getattr(self._app, "memory", None)
+                store = getattr(memory, "session_store", None) if memory else None
+                if store and getattr(store, "is_enabled", False):
+                    return store
+            except Exception:
+                pass
+            return None
+
+        def _selected_session_id(self) -> str:
+            try:
+                if getattr(self, "session_combo", None):
+                    sid = self.session_combo.currentData()
+                    if sid:
+                        return str(sid)
+            except Exception:
+                pass
+            return str(self._active_session_id or "overlay")
+
+        def _on_session_selection_changed(self, index: int) -> None:
+            try:
+                if not getattr(self, "session_combo", None):
+                    return
+                sid = self.session_combo.itemData(index)
+                if not sid:
+                    return
+                asyncio.create_task(self._switch_to_session(str(sid)))
+            except Exception:
+                pass
+
+        async def _refresh_sessions(self, preferred_session_id: Optional[str] = None) -> None:
+            store = self._get_session_store()
+            if not getattr(self, "session_combo", None):
+                return
+
+            if not store:
+                self.session_combo.blockSignals(True)
+                try:
+                    self.session_combo.clear()
+                    self.session_combo.addItem("overlay", "overlay")
+                    self.session_combo.setCurrentIndex(0)
+                    self._active_session_id = "overlay"
+                finally:
+                    self.session_combo.blockSignals(False)
+                self.session_combo.setEnabled(False)
+                return
+
+            # List sessions (most-recent first)
+            try:
+                sessions = await store.list_sessions(limit=200, offset=0)
+            except Exception:
+                sessions = []
+
+            if not sessions:
+                try:
+                    sid = await store.create_session(title="New Session")
+                    sessions = await store.list_sessions(limit=200, offset=0)
+                    preferred_session_id = preferred_session_id or sid
+                except Exception:
+                    sessions = []
+
+            preferred = (preferred_session_id or self._active_session_id or "").strip() or None
+            if preferred is None and sessions:
+                preferred = str(sessions[0].get("session_id") or "").strip() or None
+
+            self.session_combo.blockSignals(True)
+            try:
+                self.session_combo.clear()
+                for s in sessions or []:
+                    sid = str(s.get("session_id") or "").strip()
+                    if not sid:
+                        continue
+                    title = str(s.get("title") or "").strip() or sid
+                    count = s.get("message_count")
+                    try:
+                        count_i = int(count) if count is not None else 0
+                    except Exception:
+                        count_i = 0
+                    label = f"{title} ({count_i} msg{'s' if count_i != 1 else ''})"
+                    self.session_combo.addItem(label, sid)
+
+                # Select preferred (if present)
+                if preferred:
+                    idx = self.session_combo.findData(preferred)
+                    if idx >= 0:
+                        self.session_combo.setCurrentIndex(idx)
+                if self.session_combo.currentIndex() < 0 and self.session_combo.count() > 0:
+                    self.session_combo.setCurrentIndex(0)
+
+                selected = self._selected_session_id()
+                self._active_session_id = selected
+            finally:
+                self.session_combo.blockSignals(False)
+
+            self.session_combo.setEnabled(True)
+
+            # Load messages for selected session.
+            await self._load_session_messages(self._selected_session_id())
+
+        async def _create_new_session(self) -> None:
+            store = self._get_session_store()
+            if not store:
+                return
+            try:
+                sid = await store.create_session(title="New Session")
+            except Exception:
+                return
+            await self._refresh_sessions(preferred_session_id=sid)
+
+        async def _switch_to_session(self, session_id: str) -> None:
+            sid = str(session_id or "").strip()
+            if not sid:
+                return
+            self._active_session_id = sid
+            await self._load_session_messages(sid)
+
+        async def _load_session_messages(self, session_id: str) -> None:
+            store = self._get_session_store()
+            sid = str(session_id or "").strip()
+            if not sid:
+                sid = "overlay"
+
+            if not store:
+                self.chat_display.clear()
+                self.chat_display.setPlaceholderText("Session storage not available.")
+                return
+
+            try:
+                rows = await store.get_messages(sid, limit=None)
+            except Exception:
+                rows = []
+
+            parts = []
+            for r in rows or []:
+                role = str(r.get("role") or "").lower()
+                content = str(r.get("content") or "")
+                if not content:
+                    continue
+                sender = "IntelCLaw"
+                if role == "user":
+                    sender = "You"
+                elif role == "assistant":
+                    sender = "IntelCLaw"
+                elif role == "system":
+                    sender = "System"
+                parts.append(f"**{sender}:**\n{content}")
+
+            self.chat_display.setPlainText("\n\n".join(parts))
+            scrollbar = self.chat_display.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
         
         def _setup_style(self) -> None:
             """Apply styling."""
@@ -231,6 +419,36 @@ if PYQT_AVAILABLE:
                 
                 #closeButton:hover {
                     background-color: rgba(255, 50, 50, 220);
+                }
+
+                #sessionLabel {
+                    color: rgba(150, 150, 170, 200);
+                    font-size: 12px;
+                    padding: 0 4px;
+                }
+
+                #sessionCombo {
+                    background-color: rgba(50, 50, 60, 220);
+                    border: 1px solid rgba(100, 100, 120, 150);
+                    border-radius: 8px;
+                    color: white;
+                    font-size: 12px;
+                    padding: 6px 8px;
+                }
+
+                #newSessionButton,
+                #refreshSessionsButton {
+                    background-color: rgba(50, 50, 60, 220);
+                    border: 1px solid rgba(100, 100, 120, 150);
+                    border-radius: 8px;
+                    color: white;
+                    font-size: 12px;
+                    padding: 6px 10px;
+                }
+
+                #newSessionButton:hover,
+                #refreshSessionsButton:hover {
+                    border: 1px solid rgba(100, 150, 255, 200);
                 }
                 
                 #chatDisplay {
@@ -286,6 +504,8 @@ if PYQT_AVAILABLE:
             message = self.input_field.text().strip()
             if not message:
                 return
+
+            session_id = self._selected_session_id()
             
             # Display user message
             self._append_message("You", message)
@@ -295,19 +515,21 @@ if PYQT_AVAILABLE:
             self.status_label.setText("Thinking...")
             
             # Process asynchronously
-            asyncio.create_task(self._process_message(message))
+            asyncio.create_task(self._process_message(message, session_id))
         
-        async def _process_message(self, message: str) -> None:
+        async def _process_message(self, message: str, session_id: str) -> None:
             """Process message through agent."""
             try:
-                response = await self._app.process_user_input(message)
-                self.response_received.emit(response)
+                response = await self._app.process_user_input(message, session_id=session_id)
+                self.response_received.emit(response, session_id)
             except Exception as e:
-                self.response_received.emit(f"Error: {str(e)}")
+                self.response_received.emit(f"Error: {str(e)}", session_id)
         
-        def _display_response(self, response: str) -> None:
+        def _display_response(self, response: str, session_id: str) -> None:
             """Display agent response."""
-            self._append_message("IntelCLaw", response)
+            # If the user switched sessions while we were processing, don't mix streams.
+            if str(session_id or "").strip() == self._selected_session_id():
+                self._append_message("IntelCLaw", response)
             self.status_label.setText("Ready")
         
         def _append_message(self, sender: str, message: str) -> None:
