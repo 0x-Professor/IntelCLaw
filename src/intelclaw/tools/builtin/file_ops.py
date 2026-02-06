@@ -599,8 +599,20 @@ class DirectoryListTool(BaseTool):
     ) -> ToolResult:
         """List directory contents."""
         try:
-            path = path.strip().strip('"').strip("'")
-            dir_path = Path(path).expanduser().resolve()
+            # Handle missing/None path gracefully – default to current directory
+            if path is None:
+                path = "."
+            # Normalize to string in case callers pass Path/other types
+            path = str(path).strip().strip('"').strip("'")
+            if not path:
+                path = "."
+
+            dir_path = Path(path).expanduser()
+            # Preserve relative paths against current working directory
+            if not dir_path.is_absolute():
+                dir_path = (Path.cwd() / dir_path).resolve()
+            else:
+                dir_path = dir_path.resolve()
             
             if not dir_path.exists():
                 return ToolResult(
