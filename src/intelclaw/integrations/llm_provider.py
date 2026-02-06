@@ -454,6 +454,7 @@ class CopilotLLM:
         self._use_anthropic_for_heavy = False
         self._bound_tools = []
         self._tools_schema = []
+        self._tool_choice = "auto"  # Reset after each ainvoke call
     
     def set_model(self, model: str) -> None:
         """
@@ -888,9 +889,12 @@ class CopilotLLM:
                 messages.append(_msg_to_openai(msg))
         
         try:
-            # Use Copilot API exclusively
+            # Use Copilot API exclusively (educational subscription)
             if not self._copilot_token:
-                raise Exception("Copilot token not available - GitHub Copilot subscription required")
+                raise Exception(
+                    "Copilot token not available. Run 'uv run python -m intelclaw onboard' to authenticate "
+                    "with your GitHub Copilot educational subscription."
+                )
             
             response = await self._call_copilot_api(messages, include_tools=True)
             
@@ -911,6 +915,10 @@ class CopilotLLM:
         except Exception as e:
             logger.error(f"Copilot API error: {e}")
             return AIMessage(content=f"Error calling GitHub Copilot API: {e}")
+        finally:
+            # Always reset tool_choice back to 'auto' after each call
+            # to prevent it from leaking to subsequent calls (TaskPlanner, synthesis, etc.)
+            self._tool_choice = "auto"
     
     def _detect_heavy_task(self, messages: List[Dict[str, str]]) -> bool:
         """Detect if messages indicate a heavy/complex task."""
@@ -966,12 +974,17 @@ class CopilotLLM:
         response = await self._anthropic_fallback.messages.create(**kwargs)
         return response.content[0].text
     
-    async def _call_copilot_api(self, messages: List[Dict[str, str]], include_tools: bool = True) -> Dict[str, Any]:
+    async def _call_copilot_api(self, messages: List[Dict[str, str]], include_tools: bool = True, _is_fallback: bool = False) -> Dict[str, Any]:
         """
         Call the GitHub Copilot API (OpenAI-compatible endpoint).
         
         This uses the exchanged Copilot API token against the Copilot API
         endpoint (like OpenClaw does). The API is OpenAI-compatible.
+        
+        Args:
+            messages: Chat messages in OpenAI format
+            include_tools: Whether to include tool schemas
+            _is_fallback: Internal flag to prevent infinite recursion on 402
         
         Returns:
             Dict with 'content' and optionally 'tool_calls'
@@ -1050,24 +1063,104 @@ class CopilotLLM:
                     return result
                 
                 elif response.status == 401:
-                    # Token might be expired, clear cache and fall back
-                    logger.warning("Copilot token expired, clearing cache")
+                    # Token expired - refresh and retry on Copilot API
+                    logger.warning("Copilot token expired, refreshing...")
                     if self.COPILOT_TOKEN_CACHE.exists():
                         self.COPILOT_TOKEN_CACHE.unlink()
                     self._copilot_token = None
-                    # Fall back to GitHub Models API
-                    return await self._call_github_models_api(messages, include_tools)
+                    
+                    # Try to refresh the token
+                    if self._github_token:
+                        copilot_result = await self._get_copilot_token(self._github_token)
+                        if copilot_result:
+                            self._copilot_token = copilot_result["token"]
+                            self._copilot_token_expires_at = copilot_result.get("expires_at")
+                            self._copilot_base_url = copilot_result.get("base_url", DEFAULT_COPILOT_API_BASE_URL)
+                            logger.success("Copilot token refreshed, retrying...")
+                            return await self._call_copilot_api(messages, include_tools, _is_fallback=True)
+                    
+                    raise Exception(
+                        "Copilot token expired and could not be refreshed. "
+                        "Run 'uv run python -m intelclaw onboard' to re-authenticate."
+                    )
+                
+                elif response.status == 402:
+                    # Quota exceeded for current model
+                    if _is_fallback:
+                        # Already in a fallback attempt, don't recurse further
+                        raise Exception(f"Copilot API quota exceeded for fallback model '{self.model}'")
+                    
+                    # Try fallback models on same Copilot API first
+                    original_model = self.model
+                    fallback_models = ["gpt-4o-mini", "gpt-4.1-nano", "gpt-4.1-mini"]
+                    # Remove current model from fallbacks
+                    fallback_models = [m for m in fallback_models if m != original_model]
+                    
+                    for fallback_model in fallback_models:
+                        try:
+                            logger.warning(f"Copilot quota exceeded for '{original_model}', trying fallback model '{fallback_model}' on Copilot API")
+                            # Temporarily switch model for retry
+                            saved_model = self.model
+                            self.model = fallback_model
+                            result = await self._call_copilot_api(messages, include_tools, _is_fallback=True)
+                            # Restore original model preference (user's choice) for next time
+                            self.model = saved_model
+                            return result
+                        except Exception:
+                            self.model = original_model  # Restore on failure
+                            continue
+                    
+                    # All Copilot fallback models also exhausted
+                    raise Exception(
+                        f"Copilot API quota exceeded for model '{original_model}' and all fallback models. "
+                        f"Your educational plan quota may be exhausted for today. "
+                        f"Wait for quota to reset or try a different model from the model selector."
+                    )
                 
                 elif response.status == 403:
-                    logger.warning(f"Copilot API access denied: {response_text}")
+                    logger.warning(f"Copilot API access denied for model '{self.model}': {response_text}")
+                    # Model may not be available on user's plan - try fallback
+                    if not _is_fallback:
+                        fallback_models = ["gpt-4o-mini", "gpt-4.1-nano"]
+                        fallback_models = [m for m in fallback_models if m != self.model]
+                        for fb in fallback_models:
+                            try:
+                                logger.warning(f"Trying fallback model '{fb}' on Copilot API")
+                                saved = self.model
+                                self.model = fb
+                                result = await self._call_copilot_api(messages, include_tools, _is_fallback=True)
+                                self.model = saved
+                                return result
+                            except Exception:
+                                self.model = saved  # restore
+                                continue
                     raise Exception(
-                        "Copilot API access denied. Make sure you have an active "
-                        "GitHub Copilot subscription and the model is available."
+                        f"Copilot API access denied for model '{self.model}'. "
+                        "Make sure you have an active GitHub Copilot subscription "
+                        "and the model is available on your educational plan."
                     )
                 
                 elif response.status == 429:
-                    logger.warning("Copilot API rate limited, falling back to GitHub Models")
-                    return await self._call_github_models_api(messages, include_tools)
+                    # Rate limited - retry with fallback model on Copilot API
+                    logger.warning(f"Copilot API rate limited for model '{self.model}'")
+                    if not _is_fallback:
+                        fallback_models = ["gpt-4o-mini", "gpt-4.1-nano"]
+                        fallback_models = [m for m in fallback_models if m != self.model]
+                        for fb in fallback_models:
+                            try:
+                                logger.warning(f"Rate limited, trying fallback model '{fb}'")
+                                saved = self.model
+                                self.model = fb
+                                result = await self._call_copilot_api(messages, include_tools, _is_fallback=True)
+                                self.model = saved
+                                return result
+                            except Exception:
+                                self.model = saved
+                                continue
+                    raise Exception(
+                        f"Copilot API rate limited for model '{self.model}'. "
+                        "Wait a moment and try again, or switch to a different model."
+                    )
                 
                 else:
                     logger.error(f"Copilot API error: {response.status} - {response_text}")
