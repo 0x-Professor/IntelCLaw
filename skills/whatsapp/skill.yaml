@@ -1,0 +1,31 @@
+id: whatsapp
+name: WhatsApp
+version: 0.1.0
+description: Automate WhatsApp via WhatsApp MCP (depends on Windows skill).
+icon: "💬"
+
+enabled_by_default: false
+depends_on: ["windows"]
+
+triggers:
+  keywords:
+    - whatsapp
+    - message
+    - send message
+    - dm
+    - chat
+  regex: []
+
+agent:
+  instructions_file: "AGENT.md"
+
+mcp_servers:
+  - id: whatsapp_mcp
+    transport: stdio
+    command: "uv"
+    args: ["run", "main.py"]
+    env: {}
+    cwd: "../../data/vendor/whatsapp-mcp/whatsapp-mcp-server"
+    tool_namespace: "whatsapp"
+    tool_allowlist: []
+    tool_denylist: []

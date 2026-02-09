@@ -61,6 +61,8 @@ class AgentContext:
     active_window: Optional[str] = None
     clipboard_content: Optional[str] = None
     user_preferences: Dict[str, Any] = field(default_factory=dict)
+    requested_skill: Optional[str] = None
+    requested_team_mode: Optional[str] = None  # "auto" | "single" | "multi"
     session_facts: List[str] = field(default_factory=list)
     timestamp: datetime = field(default_factory=datetime.now)
 

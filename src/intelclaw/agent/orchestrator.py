@@ -39,12 +39,16 @@ from intelclaw.agent.router import IntentRouter
 from intelclaw.agent.task_planner import TaskPlanner, TaskPlan, TaskStep, TaskStatus as PlanTaskStatus, TaskQueue, QueuedTask, TaskPriority
 from intelclaw.integrations.llm_provider import LLMProvider
 from intelclaw.security.redaction import contains_secret
+from intelclaw.skills.router import SkillRouter
+from intelclaw.teams.mailbox import MailboxMessage, TeamMailbox
+from intelclaw.teams.registry import TeamRegistry
 
 if TYPE_CHECKING:
     from intelclaw.config.manager import ConfigManager
     from intelclaw.memory.manager import MemoryManager
     from intelclaw.tools.registry import ToolRegistry
     from intelclaw.core.events import EventBus
+    from intelclaw.skills.manager import SkillManager
 
 
 class AgentState(TypedDict):
@@ -64,6 +68,7 @@ class AgentState(TypedDict):
     tool_cache: Dict[str, str]
     tool_call_counts: Dict[str, int]
     force_no_tool: bool
+    allowed_tools: List[str]
 
 
 class AgentOrchestrator(BaseAgent):
@@ -94,6 +99,8 @@ class AgentOrchestrator(BaseAgent):
         memory: "MemoryManager",
         tools: "ToolRegistry",
         event_bus: "EventBus",
+        skills: Optional["SkillManager"] = None,
+        mailbox: Optional[TeamMailbox] = None,
     ):
         """
         Initialize the orchestrator.
@@ -113,15 +120,21 @@ class AgentOrchestrator(BaseAgent):
         
         self.config = config
         self.event_bus = event_bus
+        self.skills = skills
+        self.mailbox = mailbox
         self.router = IntentRouter()
         self.sub_agents: Dict[str, BaseAgent] = {}
+
+        # Skill routing + team registry (initialized later)
+        self.skill_router: Optional[SkillRouter] = None
+        self.team_registry: Optional[TeamRegistry] = None
         
         # LangGraph components (initialized later)
         self._llm_provider: Optional[LLMProvider] = None
         self._llm = None  # Will be set from provider
         self._graph: Optional[StateGraph] = None
         self._compiled_graph = None
-        self._langchain_tools: List[BaseTool] = []
+        self._langchain_tools: List[BaseTool] = []  # deprecated: use dynamic allowlists per request
         
         # Conversation history (short-term memory)
         self._conversation_history: List[BaseMessage] = []
@@ -185,9 +198,41 @@ class AgentOrchestrator(BaseAgent):
         
         logger.info(f"Using LLM provider: {self._llm_provider.active_provider}")
         
-        # Get tools from registry
-        if self.tools:
-            self._langchain_tools = await self.tools.get_langchain_tools()
+        # Tools are bound dynamically per-request (skill allowlists). Avoid pre-loading everything.
+        self._langchain_tools = []
+
+        # Initialize skill router + team registry (best-effort)
+        if self.skills:
+            try:
+                self.skill_router = SkillRouter(self.skills, self._llm_provider)
+            except Exception as e:
+                logger.debug(f"SkillRouter init failed: {e}")
+                self.skill_router = None
+
+            if not self.mailbox:
+                try:
+                    self.mailbox = TeamMailbox(self.event_bus)
+                except Exception:
+                    self.mailbox = None
+
+            if self.tools:
+                try:
+                    self.team_registry = TeamRegistry(
+                        llm_provider=self._llm_provider,
+                        tools=self.tools,
+                        skills=self.skills,
+                        memory=self.memory,
+                    )
+                    await self.team_registry.refresh()
+                except Exception as e:
+                    logger.debug(f"TeamRegistry init failed: {e}")
+                    self.team_registry = None
+
+            if self.event_bus and self.team_registry:
+                try:
+                    await self.event_bus.subscribe("skills.changed", self._on_skills_changed)
+                except Exception as e:
+                    logger.debug(f"Failed to subscribe to skills.changed for team refresh: {e}")
         
         # Initialize Task Planner for autonomous workflows
         self._task_planner = TaskPlanner(
@@ -362,6 +407,45 @@ class AgentOrchestrator(BaseAgent):
             await self.event_bus.emit(name, data, source="agent")
         except Exception as e:
             logger.debug(f"Event emit failed ({name}): {e}")
+
+    async def _post_mailbox(
+        self,
+        *,
+        session_id: Optional[str],
+        kind: str,
+        title: str,
+        body: str = "",
+        from_agent: str = "team_lead",
+        to: str = "user",
+        task_id: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.mailbox:
+            return
+        try:
+            await self.mailbox.post(
+                MailboxMessage(
+                    from_agent=from_agent,
+                    to=to,
+                    kind=kind,
+                    title=title,
+                    body=body,
+                    session_id=session_id,
+                    task_id=task_id,
+                    meta=meta or {},
+                )
+            )
+        except Exception as e:
+            logger.debug(f"Mailbox post failed: {e}")
+
+    async def _on_skills_changed(self, event: Any) -> None:
+        """Refresh team registry when skills are installed/updated/enabled/disabled."""
+        if not self.team_registry:
+            return
+        try:
+            await self.team_registry.refresh()
+        except Exception as e:
+            logger.debug(f"TeamRegistry refresh on skills.changed failed: {e}")
 
     async def _update_workflow_state(self, **updates: Any) -> None:
         """Update internal workflow state and broadcast to UI."""
@@ -1067,7 +1151,16 @@ class AgentOrchestrator(BaseAgent):
         messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
         
         # Get LLM response with tool binding
-        if self._langchain_tools and not state.get("force_no_tool"):
+        langchain_tools: List[BaseTool] = []
+        if self.tools and not state.get("force_no_tool"):
+            try:
+                allow = set(state.get("allowed_tools") or [])
+                langchain_tools = await self.tools.get_langchain_tools(allowlist=allow if allow else None)
+            except Exception as e:
+                logger.debug(f"Failed to get LangChain tools for request allowlist: {e}")
+                langchain_tools = []
+
+        if langchain_tools and not state.get("force_no_tool"):
             # On the first iteration, if the query clearly requires tool use,
             # force the LLM to call a tool instead of responding with text
             tool_choice = "auto"
@@ -1082,7 +1175,7 @@ class AgentOrchestrator(BaseAgent):
                     tool_choice = "required"
                     logger.info(f"Forcing tool_choice='required' for tool-required query: {user_msg[:80]}")
             
-            llm_with_tools = self._llm.bind_tools(self._langchain_tools, tool_choice=tool_choice)
+            llm_with_tools = self._llm.bind_tools(langchain_tools, tool_choice=tool_choice)
             response = await llm_with_tools.ainvoke(messages)
         else:
             if state.get("force_no_tool"):
@@ -1418,6 +1511,57 @@ class AgentOrchestrator(BaseAgent):
         except Exception:
             args_json = str(tool_args)
         return f"{tool_name}|{args_json}"
+
+    def _compute_allowed_tools(self, requested_skill: Optional[str]) -> List[str]:
+        """
+        Compute the per-request tool allowlist to avoid binding every MCP tool.
+
+        Default: all non-MCP tools.
+        If requested_skill is set: include MCP tools for that skill + its dependency chain.
+        """
+        if not self.tools:
+            return []
+
+        sid = str(requested_skill or "").strip() or None
+        if sid and self.team_registry:
+            try:
+                allow = self.team_registry.allowlist_for_member(f"skill:{sid}", skill_id=sid)
+                return sorted({str(x) for x in allow if x})
+            except Exception:
+                pass
+
+        base = [d.name for d in self.tools.list_tools() if not str(d.name).startswith("mcp_")]
+        return sorted({str(x) for x in base if x})
+
+    def _select_member_for_step(self, step: TaskStep) -> str:
+        """Select a team member id for a TaskPlanner step (best-effort)."""
+        tool = str(step.tool or "").strip()
+        if not tool:
+            return "general"
+
+        if tool.startswith("mcp_") and self.tools:
+            sid = None
+            try:
+                sid = self.tools.get_skill_id_for_tool(tool)
+            except Exception:
+                sid = None
+            if sid:
+                return f"skill:{sid}"
+            return "general"
+
+        if tool in {"tavily_search", "web_scrape"}:
+            return "research"
+
+        if tool.startswith("file_") or tool in {"code_execute", "pip_install"}:
+            return "coding"
+
+        if tool in {"shell_command", "powershell", "system_info", "screenshot", "clipboard", "launch_app"}:
+            return "system"
+
+        if tool.startswith("windows_"):
+            return "system"
+
+        return "general"
     
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
         """Execute a tool through the registry."""
@@ -1781,6 +1925,106 @@ Focus only on the current plan step unless the user changes the goal.
 
         # Persist the raw user message to the session store early (best-effort).
         await self._store_session_message(sid, role="user", content=context.user_message)
+
+        # =========================================================================
+        # SKILL ROUTING (Explicit + Auto-detect)
+        # =========================================================================
+        requested_skill_id: Optional[str] = None
+        skill_decision = None
+        if self.skill_router and self.skills:
+            try:
+                skill_decision = await self.skill_router.route(context.user_message)
+                if skill_decision.skill_id:
+                    requested_skill_id = str(skill_decision.skill_id).strip()
+                    # Strip directive from message before further routing/planning.
+                    if skill_decision.cleaned_message and skill_decision.cleaned_message != context.user_message:
+                        context.user_message = skill_decision.cleaned_message
+                    # Attach to context (backwards compatible even if AgentContext hasn't been updated yet).
+                    try:
+                        setattr(context, "requested_skill", requested_skill_id)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"Skill routing failed: {e}")
+
+        # Explicit skill requested but disabled -> instruct user to enable.
+        if requested_skill_id and self.skills and skill_decision and skill_decision.reason == "explicit directive":
+            try:
+                if not await self.skills.is_enabled(requested_skill_id):
+                    msg = (
+                        f"Skill '{requested_skill_id}' is installed but **disabled**.\n\n"
+                        "Enable it in the **Skills** panel (Web UI or Overlay), then try again."
+                    )
+                    await self._post_mailbox(
+                        session_id=sid,
+                        kind="error",
+                        title="Skill disabled",
+                        body=msg,
+                        from_agent="team_lead",
+                        meta={"skill_id": requested_skill_id},
+                    )
+                    await self._store_session_message(sid, role="assistant", content=msg)
+                    return AgentResponse(answer=msg, thoughts=[], tools_used=[], success=False, error="skill disabled")
+            except Exception:
+                pass
+
+        # For non-complex requests, delegate to the requested/selected skill specialist.
+        if (
+            requested_skill_id
+            and self.skills
+            and self.team_registry
+            and (not self._task_planner or not self._is_complex_task(context.user_message))
+        ):
+            try:
+                if await self.skills.is_enabled(requested_skill_id):
+                    member_id = f"skill:{requested_skill_id}"
+                    member = self.team_registry.get_member(member_id)
+                    if member:
+                        allow_tools = self.team_registry.allowlist_for_member(
+                            member_id, skill_id=requested_skill_id
+                        )
+                        await self._post_mailbox(
+                            session_id=sid,
+                            kind="note",
+                            title=f"Delegated to skill: {requested_skill_id}",
+                            body="Running with skill-scoped tool allowlist.",
+                            from_agent="team_lead",
+                            meta={"skill_id": requested_skill_id, "member_id": member_id},
+                        )
+                        response = await member.process(context, allow_tools=allow_tools)
+                        await self._post_mailbox(
+                            session_id=sid,
+                            kind="completed" if response.success else "error",
+                            title=f"Skill finished: {requested_skill_id}",
+                            body=response.answer[:4000],
+                            from_agent=member_id,
+                            meta={"skill_id": requested_skill_id, "member_id": member_id},
+                        )
+                        await self._emit_event(
+                            "notification.completed" if response.success else "notification.error",
+                            {
+                                "session_id": sid,
+                                "title": f"{requested_skill_id} skill completed" if response.success else f"{requested_skill_id} skill failed",
+                                "message": response.answer[:2000],
+                                "skill_id": requested_skill_id,
+                                "member_id": member_id,
+                            },
+                        )
+
+                        await self._store_session_message(sid, role="assistant", content=response.answer)
+                        if self.memory:
+                            await self.memory.store_interaction(
+                                user_message=context.user_message,
+                                agent_response=response.answer,
+                                tools_used=response.tools_used,
+                            )
+                        await self._extract_and_store_preferences(
+                            user_message=context.user_message,
+                            agent_response=response.answer,
+                        )
+                        return response
+            except Exception as e:
+                logger.debug(f"Skill member delegation failed: {e}")
         
         # Check if should delegate to sub-agent
         delegation = await self.router.route(context)
@@ -1953,8 +2197,88 @@ Focus only on the current plan step unless the user changes the goal.
                 status=AgentStatus.EXECUTING.value,
                 current_step_title=plan.steps[0].title if plan.steps else "Executing...",
             )
+
+            sid = str(getattr(context, "session_id", None) or "default").strip() or "default"
+            await self._post_mailbox(
+                session_id=sid,
+                kind="progress",
+                title="Plan created",
+                body="\n".join([f"- {s.title}" for s in plan.steps[:20]]),
+                from_agent="team_lead",
+                meta={"plan_id": plan.id, "total_steps": len(plan.steps)},
+            )
+
+            async def team_executor(step: TaskStep) -> Any:
+                member_id = self._select_member_for_step(step)
+                await self._post_mailbox(
+                    session_id=sid,
+                    kind="progress",
+                    title=f"Assigned: {step.title}",
+                    body=f"Member: {member_id}\nTool: {step.tool or '-'}",
+                    from_agent="team_lead",
+                    meta={
+                        "plan_id": plan.id,
+                        "step_id": step.id,
+                        "member_id": member_id,
+                        "tool": step.tool,
+                    },
+                )
+
+                try:
+                    # Execute tool steps directly (preserve file_write placeholder synthesis).
+                    if step.tool and self.tools:
+                        tool_args = dict(step.tool_args) if step.tool_args else {}
+                        if step.tool == "file_write":
+                            content = tool_args.get("content", "")
+                            if (
+                                not content
+                                or len(str(content)) < 50
+                                or "will be generated" in str(content).lower()
+                                or "..." in str(content)
+                            ):
+                                try:
+                                    synthesized = await self._task_planner._synthesize_content_for_file(plan, step)  # type: ignore[attr-defined]
+                                    if synthesized:
+                                        tool_args["content"] = synthesized
+                                except Exception:
+                                    pass
+
+                        result = await self.tools.execute(step.tool, tool_args)
+                    else:
+                        # No specific tool: use planner's LLM execution.
+                        result = await self._task_planner._llm_execute_step(step, plan)  # type: ignore[attr-defined]
+
+                    await self._post_mailbox(
+                        session_id=sid,
+                        kind="progress",
+                        title=f"Completed: {step.title}",
+                        body=str(result)[:4000],
+                        from_agent=member_id,
+                        meta={
+                            "plan_id": plan.id,
+                            "step_id": step.id,
+                            "member_id": member_id,
+                            "tool": step.tool,
+                        },
+                    )
+                    return result
+                except Exception as e:
+                    await self._post_mailbox(
+                        session_id=sid,
+                        kind="error",
+                        title=f"Failed: {step.title}",
+                        body=str(e),
+                        from_agent=member_id,
+                        meta={
+                            "plan_id": plan.id,
+                            "step_id": step.id,
+                            "member_id": member_id,
+                            "tool": step.tool,
+                        },
+                    )
+                    raise
             
-            executed_plan = await self._task_planner.execute_plan(plan)
+            executed_plan = await self._task_planner.execute_plan(plan, executor=team_executor, parallel=True)
             
             # Step 3: Build response from execution results
             thoughts = []
@@ -2010,13 +2334,30 @@ Focus only on the current plan step unless the user changes the goal.
                 status=self.status.value,
                 progress=100 if executed_plan.is_complete else executed_plan.progress_percent,
             )
+
+            await self._post_mailbox(
+                session_id=sid,
+                kind="completed" if executed_plan.is_complete else "error",
+                title="Task completed" if executed_plan.is_complete else "Task failed",
+                body=answer[:4000],
+                from_agent="team_lead",
+                meta={"plan_id": plan.id, "progress": executed_plan.progress_percent},
+            )
+            await self._emit_event(
+                "notification.completed" if executed_plan.is_complete else "notification.error",
+                {
+                    "session_id": sid,
+                    "title": "Task completed" if executed_plan.is_complete else "Task failed",
+                    "message": answer[:2000],
+                },
+            )
             
             return AgentResponse(
                 answer=answer,
                 thoughts=thoughts,
                 tools_used=tools_used,
                 latency_ms=latency,
-                success=plan.is_complete,
+                success=executed_plan.is_complete,
             )
             
         except Exception as e:
@@ -2109,6 +2450,9 @@ Be conversational and natural in your response."""
         combined_preferences = context.user_preferences or {}
         if user_preferences_context:
             combined_preferences["mem0_preferences"] = user_preferences_context
+
+        requested_skill = getattr(context, "requested_skill", None)
+        allowed_tools = self._compute_allowed_tools(str(requested_skill).strip() if requested_skill else None)
         
         initial_state: AgentState = {
             "messages": list(hist) + [user_message],
@@ -2134,6 +2478,7 @@ Be conversational and natural in your response."""
             "tool_cache": {},
             "tool_call_counts": {},
             "force_no_tool": False,
+            "allowed_tools": allowed_tools,
         }
         
         try:

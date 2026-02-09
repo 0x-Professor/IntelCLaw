@@ -9,6 +9,10 @@ class IntelCLawApp {
         this.currentSessionId = null;
         this.sessions = [];
         this.sessionBusy = false;
+        this.skills = [];
+        this.mailboxMessages = [];
+        this.inboxUnread = 0;
+        this.activePanelTab = 'general';
 
         // Session picker (header dropdown)
         this.sessionPickerQuery = '';
@@ -53,6 +57,7 @@ class IntelCLawApp {
         this._setupWebSocket();
         this._loadModels();  // Load models from API
         this._applySettings();
+        this._fetchSkills(); // Best-effort: pre-load skills list for panel
 
         // Load persisted sessions from backend; fall back to a new session.
         try {
@@ -209,6 +214,9 @@ class IntelCLawApp {
             menuToggle: document.getElementById('menuToggle'),
             modelSelector: document.getElementById('modelSelector'),
             settingsToggle: document.getElementById('settingsToggle'),
+            skillsToggle: document.getElementById('skillsToggle'),
+            inboxToggle: document.getElementById('inboxToggle'),
+            inboxBadge: document.getElementById('inboxBadge'),
             sessionPicker: document.getElementById('sessionPicker'),
             sessionSelector: document.getElementById('sessionSelector'),
             sessionDropdown: document.getElementById('sessionDropdown'),
@@ -227,6 +235,7 @@ class IntelCLawApp {
             
             // Settings Panel
             panelClose: document.getElementById('panelClose'),
+            panelTitle: document.getElementById('panelTitle'),
             streamingToggle: document.getElementById('streamingToggle'),
             showToolsToggle: document.getElementById('showToolsToggle'),
             soundToggle: document.getElementById('soundToggle'),
@@ -234,6 +243,27 @@ class IntelCLawApp {
             temperatureValue: document.getElementById('temperatureValue'),
             maxTokensInput: document.getElementById('maxTokensInput'),
             systemPromptInput: document.getElementById('systemPromptInput'),
+
+            // Skills + Inbox tabs
+            skillsList: document.getElementById('skillsList'),
+            refreshSkillsBtn: document.getElementById('refreshSkillsBtn'),
+            addSkillBtn: document.getElementById('addSkillBtn'),
+            inboxList: document.getElementById('inboxList'),
+            refreshInboxBtn: document.getElementById('refreshInboxBtn'),
+            clearInboxBtn: document.getElementById('clearInboxBtn'),
+
+            // Add skill modal
+            addSkillModal: document.getElementById('addSkillModal'),
+            addSkillBackdrop: document.getElementById('addSkillBackdrop'),
+            addSkillClose: document.getElementById('addSkillClose'),
+            skillManifestInput: document.getElementById('skillManifestInput'),
+            skillAgentInput: document.getElementById('skillAgentInput'),
+            skillEnableOnInstall: document.getElementById('skillEnableOnInstall'),
+            skillInstallBtn: document.getElementById('skillInstallBtn'),
+            addSkillError: document.getElementById('addSkillError'),
+
+            // Toasts
+            toastContainer: document.getElementById('toastContainer'),
             
             // Navigation
             navItems: document.querySelectorAll('.nav-item[data-view]'),
@@ -257,8 +287,16 @@ class IntelCLawApp {
         this.elements.menuToggle.addEventListener('click', () => this._toggleSidebar());
         
         // Settings toggle
-        this.elements.settingsToggle.addEventListener('click', () => this._toggleRightPanel());
+        this.elements.settingsToggle.addEventListener('click', () => this._openPanelTab('general', { toggle: true }));
         this.elements.panelClose.addEventListener('click', () => this._toggleRightPanel(false));
+
+        // Skills / Inbox shortcuts
+        if (this.elements.skillsToggle) {
+            this.elements.skillsToggle.addEventListener('click', () => this._openPanelTab('skills', { toggle: true }));
+        }
+        if (this.elements.inboxToggle) {
+            this.elements.inboxToggle.addEventListener('click', () => this._openPanelTab('inbox', { toggle: true }));
+        }
         
         // Model selector
         this.elements.modelSelector.addEventListener('change', (e) => this._handleModelChange(e));
@@ -325,6 +363,37 @@ class IntelCLawApp {
             tab.addEventListener('click', () => this._handleTabSwitch(tab));
         });
 
+        // Skills tab actions
+        if (this.elements.refreshSkillsBtn) {
+            this.elements.refreshSkillsBtn.addEventListener('click', () => this._fetchSkills());
+        }
+        if (this.elements.addSkillBtn) {
+            this.elements.addSkillBtn.addEventListener('click', () => this._showAddSkillModal(true));
+        }
+
+        // Inbox tab actions
+        if (this.elements.refreshInboxBtn) {
+            this.elements.refreshInboxBtn.addEventListener('click', () => this._fetchMailbox());
+        }
+        if (this.elements.clearInboxBtn) {
+            this.elements.clearInboxBtn.addEventListener('click', () => {
+                this.mailboxMessages = [];
+                this._renderInbox();
+                this._setInboxUnread(0);
+            });
+        }
+
+        // Add skill modal actions
+        if (this.elements.addSkillBackdrop) {
+            this.elements.addSkillBackdrop.addEventListener('click', () => this._showAddSkillModal(false));
+        }
+        if (this.elements.addSkillClose) {
+            this.elements.addSkillClose.addEventListener('click', () => this._showAddSkillModal(false));
+        }
+        if (this.elements.skillInstallBtn) {
+            this.elements.skillInstallBtn.addEventListener('click', () => this._installSkillFromModal());
+        }
+
         // Workflow panel toggle
         if (this.elements.workflowToggle) {
             this.elements.workflowToggle.addEventListener('click', () => this._toggleWorkflowPanel());
@@ -380,9 +449,29 @@ class IntelCLawApp {
         this.ws.on('error', (data) => this._handleError(data));
         this.ws.on('state', (data) => this._handleState(data));
         this.ws.on('workflow', (data) => this._handleWorkflow(data));
+        this.ws.on('skills', () => this._fetchSkills());
+        this.ws.on('mailbox', (data) => this._handleMailboxMessage(data));
+        this.ws.on('notification', (data) => this._handleNotification(data));
 
         // Connect
         this.ws.connect();
+    }
+
+    _openPanelTab(tabId, { toggle = false } = {}) {
+        const t = String(tabId || '').trim();
+        if (!t) return;
+
+        const isCollapsed = this.elements.rightPanel.classList.contains('collapsed');
+        if (toggle && !isCollapsed && this.activePanelTab === t) {
+            this._toggleRightPanel(false);
+            return;
+        }
+
+        this._toggleRightPanel(true);
+        const tabBtn = document.querySelector(`.panel-tab[data-tab="${t}"]`);
+        if (tabBtn) {
+            this._handleTabSwitch(tabBtn);
+        }
     }
 
     /**
@@ -1073,6 +1162,7 @@ class IntelCLawApp {
      */
     _handleTabSwitch(tab) {
         const tabId = tab.dataset.tab;
+        this.activePanelTab = tabId;
         
         // Update tab buttons
         this.elements.panelTabs.forEach(t => t.classList.remove('active'));
@@ -1083,6 +1173,25 @@ class IntelCLawApp {
             content.classList.add('hidden');
         });
         document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+
+        // Title + on-open refresh
+        const titleMap = {
+            general: 'Settings',
+            model: 'Settings',
+            tools: 'Settings',
+            skills: 'Skills',
+            inbox: 'Inbox'
+        };
+        if (this.elements.panelTitle) {
+            this.elements.panelTitle.textContent = titleMap[tabId] || 'Panel';
+        }
+        if (tabId === 'skills') {
+            this._fetchSkills();
+        }
+        if (tabId === 'inbox') {
+            this._fetchMailbox();
+            this._setInboxUnread(0);
+        }
     }
 
     /**
@@ -1114,6 +1223,299 @@ class IntelCLawApp {
         } else {
             this.elements.rightPanel.classList.toggle('collapsed', !show);
         }
+    }
+
+    async _fetchSkills() {
+        try {
+            const resp = await fetch('/api/skills');
+            const data = await resp.json();
+            this.skills = Array.isArray(data.skills) ? data.skills : [];
+            this._renderSkills();
+        } catch (e) {
+            console.warn('[App] Failed to load skills:', e);
+        }
+    }
+
+    _renderSkills() {
+        const container = this.elements.skillsList;
+        if (!container) return;
+
+        const skills = Array.isArray(this.skills) ? this.skills : [];
+        container.innerHTML = '';
+
+        if (skills.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'panel-hint';
+            empty.textContent = 'No skills found.';
+            container.appendChild(empty);
+            return;
+        }
+
+        skills.forEach((s) => {
+            const sid = String(s.id || '').trim();
+            if (!sid) return;
+
+            const enabled = !!s.enabled;
+            const icon = s.icon || '🧩';
+            const name = s.name || sid;
+            const version = s.version || '';
+            const description = s.description || '';
+            const toolCount = (typeof s.tool_count === 'number') ? s.tool_count : 0;
+            const sourceKind = s.source_kind || '';
+
+            const health = s.health || { healthy: true, last_error: null };
+            const healthy = !!health.healthy;
+            const healthClass = healthy ? 'healthy' : 'unhealthy';
+            const healthText = enabled ? (healthy ? 'Healthy' : 'Unhealthy') : 'Disabled';
+
+            const row = document.createElement('div');
+            row.className = 'skill-row';
+
+            const meta = document.createElement('div');
+            meta.className = 'skill-meta';
+            meta.innerHTML = `
+                <div class="skill-title">
+                    <span class="skill-icon">${icon}</span>
+                    <span class="skill-name">${this._escapeHtml(name)}</span>
+                    ${version ? `<span class="skill-version">v${this._escapeHtml(version)}</span>` : ''}
+                </div>
+                ${description ? `<div class="skill-desc">${this._escapeHtml(description)}</div>` : ''}
+                <div class="skill-sub">
+                    ${sourceKind ? `<span class="skill-source">${this._escapeHtml(sourceKind)}</span>` : ''}
+                    <span class="skill-health ${healthClass}">${healthText}</span>
+                    <span class="skill-tools">${toolCount} tool${toolCount === 1 ? '' : 's'}</span>
+                </div>
+                ${enabled && !healthy && health.last_error ? `<div class="skill-desc">${this._escapeHtml(String(health.last_error).slice(0, 240))}</div>` : ''}
+            `;
+
+            const toggle = document.createElement('button');
+            toggle.className = 'toggle' + (enabled ? ' active' : '');
+            toggle.type = 'button';
+            toggle.title = enabled ? 'Disable' : 'Enable';
+            toggle.addEventListener('click', async () => {
+                toggle.disabled = true;
+                try {
+                    await this._setSkillEnabled(sid, !enabled);
+                } finally {
+                    toggle.disabled = false;
+                }
+            });
+
+            row.appendChild(meta);
+            row.appendChild(toggle);
+            container.appendChild(row);
+        });
+    }
+
+    async _setSkillEnabled(skillId, enabled) {
+        const sid = String(skillId || '').trim();
+        if (!sid) return;
+        try {
+            const url = enabled
+                ? `/api/skills/${encodeURIComponent(sid)}/enable`
+                : `/api/skills/${encodeURIComponent(sid)}/disable`;
+            const resp = await fetch(url, { method: 'POST' });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.success) {
+                const title = enabled ? 'Enable failed' : 'Disable failed';
+                const body = data.error || `HTTP ${resp.status}`;
+                this._toast('error', title, body);
+            }
+        } catch (e) {
+            this._toast('error', 'Skill update failed', String(e));
+        } finally {
+            await this._fetchSkills();
+        }
+    }
+
+    _showAddSkillModal(show) {
+        const modal = this.elements.addSkillModal;
+        if (!modal) return;
+        const shouldShow = !!show;
+        modal.classList.toggle('hidden', !shouldShow);
+        modal.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+        if (this.elements.addSkillError) {
+            this.elements.addSkillError.classList.add('hidden');
+            this.elements.addSkillError.textContent = '';
+        }
+        if (shouldShow && this.elements.skillManifestInput) {
+            this.elements.skillManifestInput.focus();
+        }
+    }
+
+    async _installSkillFromModal() {
+        const yamlText = this.elements.skillManifestInput ? this.elements.skillManifestInput.value : '';
+        const agentText = this.elements.skillAgentInput ? this.elements.skillAgentInput.value : '';
+        const enable = this.elements.skillEnableOnInstall ? !!this.elements.skillEnableOnInstall.checked : false;
+
+        try {
+            const resp = await fetch('/api/skills/install', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    manifest_yaml: yamlText || '',
+                    agent_md: agentText || '',
+                    enable
+                })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.success) {
+                const err = data.error || `HTTP ${resp.status}`;
+                if (this.elements.addSkillError) {
+                    this.elements.addSkillError.classList.remove('hidden');
+                    this.elements.addSkillError.textContent = err;
+                }
+                return;
+            }
+
+            this._toast('success', 'Skill installed', `Installed: ${data.skill_id || 'unknown'}`);
+            this._showAddSkillModal(false);
+            await this._fetchSkills();
+        } catch (e) {
+            if (this.elements.addSkillError) {
+                this.elements.addSkillError.classList.remove('hidden');
+                this.elements.addSkillError.textContent = String(e);
+            }
+        }
+    }
+
+    async _fetchMailbox() {
+        const sid = String(this.currentSessionId || '').trim();
+        if (!sid) return;
+        try {
+            const resp = await fetch(`/api/mailbox?session_id=${encodeURIComponent(sid)}&limit=200`);
+            const data = await resp.json();
+            this.mailboxMessages = Array.isArray(data.messages) ? data.messages : [];
+            this._renderInbox();
+        } catch (e) {
+            console.warn('[App] Failed to load mailbox:', e);
+        }
+    }
+
+    _renderInbox() {
+        const container = this.elements.inboxList;
+        if (!container) return;
+        const msgs = Array.isArray(this.mailboxMessages) ? this.mailboxMessages : [];
+        container.innerHTML = '';
+
+        if (msgs.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'panel-hint';
+            empty.textContent = 'Inbox is empty.';
+            container.appendChild(empty);
+            return;
+        }
+
+        msgs.forEach((m) => {
+            const item = document.createElement('div');
+            item.className = 'inbox-item';
+            const kind = String(m.kind || 'info');
+            const fromAgent = String(m.from_agent || 'agent');
+            const ts = m.ts ? new Date(m.ts) : null;
+            const time = ts ? ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const title = String(m.title || '');
+            const body = String(m.body || '');
+
+            item.innerHTML = `
+                <div class="inbox-top">
+                    <span class="inbox-agent">${this._escapeHtml(fromAgent)}</span>
+                    <span class="inbox-kind ${this._escapeHtml(kind)}">${this._escapeHtml(kind)}</span>
+                    <span class="inbox-time">${this._escapeHtml(time)}</span>
+                </div>
+                ${title ? `<div class="inbox-title">${this._escapeHtml(title)}</div>` : ''}
+                ${body ? `<div class="inbox-body">${this._escapeHtml(body).slice(0, 4000)}</div>` : ''}
+            `;
+            container.appendChild(item);
+        });
+    }
+
+    _handleMailboxMessage(data) {
+        const msg = data && data.message ? data.message : null;
+        if (!msg) return;
+        const currentSid = String(this.currentSessionId || '').trim();
+        const msgSid = String(msg.session_id || '').trim();
+        if (currentSid && msgSid && currentSid !== msgSid) return;
+
+        this.mailboxMessages = Array.isArray(this.mailboxMessages) ? this.mailboxMessages : [];
+        this.mailboxMessages.push(msg);
+        // Keep last 500 (matches server default)
+        if (this.mailboxMessages.length > 500) {
+            this.mailboxMessages = this.mailboxMessages.slice(-500);
+        }
+
+        if (this.activePanelTab === 'inbox' && !this.elements.rightPanel.classList.contains('collapsed')) {
+            this._renderInbox();
+            return;
+        }
+
+        this._setInboxUnread(this.inboxUnread + 1);
+    }
+
+    _handleNotification(data) {
+        const level = (data && data.level) ? String(data.level) : 'success';
+        const title = (data && data.title) ? String(data.title) : 'Notification';
+        const message = (data && (data.message || data.body)) ? String(data.message || data.body) : '';
+        this._toast(level, title, message);
+        if (this.settings.sound) {
+            this._playNotificationSound();
+        }
+    }
+
+    _setInboxUnread(count) {
+        const n = Math.max(0, parseInt(count || 0, 10) || 0);
+        this.inboxUnread = n;
+        if (!this.elements.inboxBadge) return;
+        this.elements.inboxBadge.textContent = String(n);
+        this.elements.inboxBadge.classList.toggle('hidden', n <= 0);
+    }
+
+    _toast(level, title, body) {
+        const container = this.elements.toastContainer;
+        if (!container) return;
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${this._escapeHtml(String(level || 'success'))}`;
+        toast.innerHTML = `
+            <div class="toast-title">${this._escapeHtml(String(title || ''))}</div>
+            ${body ? `<div class="toast-body">${this._escapeHtml(String(body)).slice(0, 2000)}</div>` : ''}
+        `;
+        container.appendChild(toast);
+
+        setTimeout(() => {
+            try { toast.remove(); } catch { /* ignore */ }
+        }, 6500);
+    }
+
+    _playNotificationSound() {
+        try {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            const ctx = new Ctx();
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'sine';
+            o.frequency.value = 880;
+            g.gain.value = 0.02;
+            o.connect(g);
+            g.connect(ctx.destination);
+            o.start();
+            setTimeout(() => {
+                try { o.stop(); } catch { /* ignore */ }
+                try { ctx.close(); } catch { /* ignore */ }
+            }, 120);
+        } catch {
+            // ignore
+        }
+    }
+
+    _escapeHtml(text) {
+        const s = String(text || '');
+        return s
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
     }
 
     _setSessionBusy(busy) {
@@ -1376,6 +1778,11 @@ class IntelCLawApp {
             // Notify backend (WebSocket current session)
             this.ws.send('new_session', { session_id: this.currentSessionId });
 
+            // Reset inbox state for the new session.
+            this.mailboxMessages = [];
+            this._renderInbox();
+            this._setInboxUnread(0);
+
             await this._loadSessions();
             this._renderSessionList();
 
@@ -1489,6 +1896,10 @@ class IntelCLawApp {
             if (this._isSessionDropdownOpen()) {
                 this._renderSessionPickerList();
             }
+
+            // Refresh mailbox for this session.
+            await this._fetchMailbox();
+            this._setInboxUnread(0);
         } catch (e) {
             console.warn('[App] Failed to switch session:', e);
         } finally {

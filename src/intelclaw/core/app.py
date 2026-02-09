@@ -16,12 +16,14 @@ from intelclaw.core.events import EventBus
 from intelclaw.config.manager import ConfigManager
 from intelclaw.agent.orchestrator import AgentOrchestrator
 from intelclaw.agent.self_improvement import SelfImprovement
+from intelclaw.skills.manager import SkillManager
 from intelclaw.memory.manager import MemoryManager
 from intelclaw.memory.data_store import DataStore
 from intelclaw.perception.manager import PerceptionManager
 from intelclaw.tools.registry import ToolRegistry
 from intelclaw.security.manager import SecurityManager
 from intelclaw.integrations.copilot import CopilotIntegration, ModelManager
+from intelclaw.teams.mailbox import TeamMailbox
 
 if TYPE_CHECKING:
     from intelclaw.ui.overlay import OverlayWindow
@@ -56,6 +58,8 @@ class IntelCLawApp:
         self.agent: Optional[AgentOrchestrator] = None
         self.overlay: Optional["OverlayWindow"] = None
         self.tray: Optional["SystemTray"] = None
+        self.skills: Optional[SkillManager] = None
+        self.mailbox: Optional[TeamMailbox] = None
         
         # Autonomous capabilities
         self.self_improvement: Optional[SelfImprovement] = None
@@ -74,6 +78,15 @@ class IntelCLawApp:
         self.config = ConfigManager(self._config_path)
         await self.config.load()
         logger.info("Configuration loaded")
+
+        # 1b. Initialize skills subsystem (before tools so MCP can load from enabled skills)
+        self.skills = SkillManager(self.config, self.event_bus)
+        await self.skills.initialize()
+        logger.info("Skills subsystem initialized")
+
+        # 1c. Initialize shared mailbox for agent teams / notifications
+        self.mailbox = TeamMailbox(self.event_bus)
+        logger.info("Team mailbox initialized")
         
         # 2. Initialize security manager
         self.security = SecurityManager(self.config)
@@ -96,7 +109,13 @@ class IntelCLawApp:
         logger.info("Perception layer initialized")
         
         # 5. Initialize tool registry
-        self.tools = ToolRegistry(self.config, self.security, memory=self.memory)
+        self.tools = ToolRegistry(
+            self.config,
+            self.security,
+            memory=self.memory,
+            skills=self.skills,
+            event_bus=self.event_bus,
+        )
         await self.tools.initialize()
         logger.info("Tool registry initialized")
         
@@ -113,6 +132,8 @@ class IntelCLawApp:
             memory=self.memory,
             tools=self.tools,
             event_bus=self.event_bus,
+            skills=self.skills,
+            mailbox=self.mailbox,
         )
         await self.agent.initialize()
         logger.info("Agent orchestrator initialized")

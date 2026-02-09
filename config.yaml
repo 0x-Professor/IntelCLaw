@@ -156,6 +156,10 @@ tools:
 
 mcp:
   enabled: true
+  timeouts:
+    start_seconds: 30
+    list_tools_seconds: 30
+    call_tool_seconds: 300
   servers: []
 
 # Security - Only protect against destructive operations

@@ -152,8 +152,18 @@ class ConfigManager:
                 "max_context_chars": 2000,
             },
         },
+        "skills": {
+            "builtin_dir": "skills",
+            "user_dir": "data/skills",
+            "state_path": "data/skills_state.json",
+        },
         "mcp": {
             "enabled": True,
+            "timeouts": {
+                "start_seconds": 30,
+                "list_tools_seconds": 30,
+                "call_tool_seconds": 300,
+            },
             "servers": [],
         },
         "security": {

@@ -137,6 +137,23 @@ Examples:
         default=8765,
         help="Gateway port"
     )
+    onboard_parser.add_argument(
+        "--skip-skills",
+        action="store_true",
+        help="Skip skill/MCP setup steps"
+    )
+    onboard_parser.add_argument(
+        "--install-windows-mcp",
+        action="store_true",
+        default=None,
+        help="Install windows-mcp during onboarding"
+    )
+    onboard_parser.add_argument(
+        "--install-whatsapp-mcp",
+        action="store_true",
+        default=None,
+        help="Install whatsapp-mcp during onboarding"
+    )
     
     # models command
     models_parser = subparsers.add_parser(
@@ -245,6 +262,9 @@ Examples:
             auth_choice=args.auth_choice,
             workspace=args.workspace,
             gateway_port=args.gateway_port,
+            skip_skills=args.skip_skills,
+            install_windows_mcp=args.install_windows_mcp,
+            install_whatsapp_mcp=args.install_whatsapp_mcp,
         ))
         return
     

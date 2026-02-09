@@ -246,6 +246,33 @@ class WebServer:
                 "workflow": self.workflow_state,
             })
 
+        async def handle_skills(event):
+            await self.manager.broadcast(
+                {
+                    "type": "skills",
+                    **(event.data or {}),
+                }
+            )
+
+        async def handle_mailbox(event):
+            await self.manager.broadcast(
+                {
+                    "type": "mailbox",
+                    **(event.data or {}),
+                }
+            )
+
+        async def handle_notification(event):
+            # Normalize completed/error events into a single websocket message type.
+            payload = dict(event.data or {})
+            payload.setdefault("level", "success" if event.name == "notification.completed" else "error")
+            await self.manager.broadcast(
+                {
+                    "type": "notification",
+                    **payload,
+                }
+            )
+
         # Subscribe with default priority
         def _schedule(coro):
             try:
@@ -261,6 +288,10 @@ class WebServer:
         _schedule(self._app.event_bus.subscribe("tool.call", handle_tool_call))
         _schedule(self._app.event_bus.subscribe("tool.result", handle_tool_result))
         _schedule(self._app.event_bus.subscribe("agent.status", handle_status))
+        _schedule(self._app.event_bus.subscribe("skills.changed", handle_skills))
+        _schedule(self._app.event_bus.subscribe("mailbox.message", handle_mailbox))
+        _schedule(self._app.event_bus.subscribe("notification.completed", handle_notification))
+        _schedule(self._app.event_bus.subscribe("notification.error", handle_notification))
     
     def _setup_routes(self):
         """Set up FastAPI routes."""
@@ -484,6 +515,154 @@ class WebServer:
                 ]
             
             return {"tools": tool_list, "count": len(tool_list)}
+
+        # ==================== Skills API ====================
+
+        async def _get_skill_deps_map() -> Dict[str, List[str]]:
+            if not self._app or not getattr(self._app, "skills", None):
+                return {}
+            try:
+                skills_list = await self._app.skills.list_skills()
+            except Exception:
+                skills_list = []
+            deps: Dict[str, List[str]] = {}
+            for s in skills_list or []:
+                sid = str(s.get("id") or "").strip()
+                if not sid:
+                    continue
+                deps[sid] = [str(x) for x in (s.get("depends_on") or []) if str(x).strip()]
+            return deps
+
+        def _deps_closure(skill_id: str, deps_map: Dict[str, List[str]]) -> List[str]:
+            sid = str(skill_id or "").strip()
+            if not sid:
+                return []
+            out: List[str] = []
+            seen: set[str] = set()
+
+            def visit(cur: str) -> None:
+                if cur in seen:
+                    return
+                seen.add(cur)
+                for d in deps_map.get(cur, []):
+                    if d:
+                        visit(d)
+                out.append(cur)
+
+            visit(sid)
+            return out  # deps first, then sid
+
+        async def _skills_response() -> Dict[str, Any]:
+            skills_mgr = getattr(self._app, "skills", None) if self._app else None
+            tools_reg = getattr(self._app, "tools", None) if self._app else None
+
+            if not skills_mgr:
+                return {"skills": [], "count": 0}
+
+            skills_list = await skills_mgr.list_skills()
+            deps_map = await _get_skill_deps_map()
+
+            # Best-effort health/tool_count computation.
+            result: List[Dict[str, Any]] = []
+            for s in skills_list or []:
+                sid = str(s.get("id") or "").strip()
+                chain = _deps_closure(sid, deps_map)
+
+                # MCP tool count: include dependency tool namespaces for skills like whatsapp.
+                mcp_tools: set[str] = set()
+                if tools_reg:
+                    for dep_id in chain:
+                        try:
+                            mcp_tools.update(tools_reg.get_mcp_tool_names_for_skill(dep_id))
+                        except Exception:
+                            pass
+
+                health = {"healthy": True, "last_error": None}
+                if tools_reg and hasattr(tools_reg, "get_mcp_server_health"):
+                    # Aggregate health across MCP servers for this skill and its dependencies.
+                    unhealthy_error = None
+                    any_servers = False
+                    for dep_id in chain:
+                        manifest = await skills_mgr.get_manifest(dep_id)
+                        for server in getattr(manifest, "mcp_servers", None) or []:
+                            any_servers = True
+                            h = tools_reg.get_mcp_server_health(dep_id, str(server.id))
+                            if not h.get("healthy", False) and not unhealthy_error:
+                                unhealthy_error = h.get("last_error")
+                    if any_servers and unhealthy_error:
+                        health = {"healthy": False, "last_error": unhealthy_error}
+                    elif any_servers:
+                        health = {"healthy": True, "last_error": None}
+
+                item = dict(s)
+                item["tool_count"] = len(mcp_tools)
+                item["health"] = health
+                result.append(item)
+
+            return {"skills": result, "count": len(result)}
+
+        @self.fastapi.get("/api/skills")
+        async def list_skills():
+            return await _skills_response()
+
+        @self.fastapi.post("/api/skills/{skill_id}/enable")
+        async def enable_skill(skill_id: str):
+            if not self._app or not getattr(self._app, "skills", None):
+                return JSONResponse({"success": False, "error": "skills subsystem unavailable"}, status_code=503)
+            res = await self._app.skills.enable(skill_id)
+            # Ensure tools sync quickly for UI.
+            if res.get("success") and self._app.tools:
+                try:
+                    await self._app.tools.reload_mcp_tools()
+                except Exception:
+                    pass
+            return res
+
+        @self.fastapi.post("/api/skills/{skill_id}/disable")
+        async def disable_skill(skill_id: str):
+            if not self._app or not getattr(self._app, "skills", None):
+                return JSONResponse({"success": False, "error": "skills subsystem unavailable"}, status_code=503)
+            res = await self._app.skills.disable(skill_id)
+            if res.get("success") and self._app.tools:
+                try:
+                    await self._app.tools.reload_mcp_tools()
+                except Exception:
+                    pass
+            # Return 409 on dependency block for easier UI handling.
+            if not res.get("success") and res.get("blocked_by"):
+                return JSONResponse(res, status_code=409)
+            return res
+
+        @self.fastapi.post("/api/skills/install")
+        async def install_skill(request: Request):
+            if not self._app or not getattr(self._app, "skills", None):
+                return JSONResponse({"success": False, "error": "skills subsystem unavailable"}, status_code=503)
+            try:
+                payload = await request.json()
+            except Exception:
+                payload = {}
+            manifest_yaml = payload.get("manifest_yaml") if isinstance(payload, dict) else None
+            agent_md = payload.get("agent_md") if isinstance(payload, dict) else None
+            enable = bool(payload.get("enable", False)) if isinstance(payload, dict) else False
+
+            res = await self._app.skills.install_from_yaml(
+                str(manifest_yaml or ""),
+                agent_md_text=str(agent_md) if agent_md is not None else None,
+                enable=enable,
+            )
+            if res.get("success") and self._app.tools:
+                try:
+                    await self._app.tools.reload_mcp_tools()
+                except Exception:
+                    pass
+            return res
+
+        @self.fastapi.get("/api/mailbox")
+        async def get_mailbox(session_id: str, limit: int = 200):
+            if not self._app or not getattr(self._app, "mailbox", None):
+                return {"session_id": session_id, "messages": [], "count": 0}
+            msgs = await self._app.mailbox.list_messages(session_id, limit=limit)
+            return {"session_id": session_id, "messages": msgs, "count": len(msgs)}
         
         @self.fastapi.post("/api/chat")
         async def chat(request: Request):

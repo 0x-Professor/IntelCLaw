@@ -1,0 +1,37 @@
+id: windows
+name: Windows
+version: 0.1.0
+description: Windows automation via MCP.
+icon: "🪟"
+
+enabled_by_default: true
+depends_on: []
+
+triggers:
+  keywords:
+    - windows
+    - registry
+    - task scheduler
+    - service
+    - services
+    - process
+    - processes
+    - event log
+    - ui automation
+    - powershell
+  regex: []
+
+agent:
+  instructions_file: "AGENT.md"
+
+mcp_servers:
+  - id: windows_mcp
+    transport: stdio
+    command: "windows-mcp"
+    args: ["--transport", "stdio"]
+    env:
+      ANONYMIZED_TELEMETRY: "false"
+    cwd: null
+    tool_namespace: "windows"
+    tool_allowlist: []
+    tool_denylist: []

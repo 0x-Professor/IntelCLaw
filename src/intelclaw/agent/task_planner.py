@@ -646,6 +646,10 @@ Return a JSON object:
             if recent:
                 context_str += "\n\nRecent Conversation:\n"
                 context_str += str(recent)[:2000] + "\n"
+            instructions = context.get("agent_instructions")
+            if instructions:
+                context_str += "\n\nAgent Instructions:\n"
+                context_str += str(instructions)[:2000] + "\n"
         
         system_prompt = self.PLANNING_SYSTEM_PROMPT.format(
             tools=tools_str,

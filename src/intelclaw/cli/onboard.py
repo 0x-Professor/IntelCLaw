@@ -12,6 +12,8 @@ import asyncio
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -193,6 +195,9 @@ async def run_onboard(
     workspace: Optional[str] = None,
     gateway_port: int = 8765,
     skip_auth: bool = False,
+    skip_skills: bool = False,
+    install_windows_mcp: Optional[bool] = None,
+    install_whatsapp_mcp: Optional[bool] = None,
 ) -> bool:
     """
     Run the onboarding wizard.
@@ -203,6 +208,9 @@ async def run_onboard(
         workspace: Pre-selected workspace path
         gateway_port: Gateway port
         skip_auth: Skip authentication step
+        skip_skills: Skip skill/MCP setup steps
+        install_windows_mcp: Force install windows-mcp when set (defaults to enabled in non-interactive)
+        install_whatsapp_mcp: Force install whatsapp-mcp when set (defaults to disabled in non-interactive)
     
     Returns:
         True if onboarding completed successfully
@@ -215,7 +223,7 @@ async def run_onboard(
     
     # Step 1: Check existing config
     if CONFIG_FILE.exists() and not non_interactive:
-        print_step(0, 5, "Existing Configuration")
+        print_step(0, 6, "Existing Configuration")
         print("An existing configuration was found.")
         choice = prompt_choice(
             "What would you like to do?",
@@ -231,7 +239,7 @@ async def run_onboard(
     # Step 2: Model/Auth
     if not skip_auth:
         if not non_interactive:
-            print_step(1, 5, "Model & Authentication")
+            print_step(1, 6, "Model & Authentication")
             
             print("Select your LLM provider:")
             print()
@@ -377,7 +385,7 @@ async def run_onboard(
     
     # Step 3: Workspace
     if not non_interactive:
-        print_step(2, 5, "Workspace")
+        print_step(2, 6, "Workspace")
         
         default_workspace = str(WORKSPACE_DIR)
         print(f"The workspace is where IntelCLaw stores files and memories.")
@@ -401,7 +409,7 @@ async def run_onboard(
     
     # Step 4: Gateway Settings
     if not non_interactive:
-        print_step(3, 5, "Gateway Settings")
+        print_step(3, 6, "Gateway Settings")
         
         print("The gateway provides the web interface and API.")
         
@@ -438,7 +446,7 @@ async def run_onboard(
     
     # Step 5: Save Config
     if not non_interactive:
-        print_step(4, 5, "Saving Configuration")
+        print_step(4, 6, "Saving Configuration")
     
     config["wizard"] = {
         "lastRunAt": __import__("datetime").datetime.now().isoformat(),
@@ -450,9 +458,19 @@ async def run_onboard(
     if not non_interactive:
         print(f"✅ Configuration saved to: {CONFIG_FILE}")
     
-    # Step 6: Health Check
+    # Step 6: Skills & MCP Servers
+    if not skip_skills:
+        if not non_interactive:
+            print_step(5, 6, "Skills & MCP Servers")
+        await _setup_skills_and_mcp(
+            non_interactive=non_interactive,
+            force_install_windows_mcp=install_windows_mcp,
+            force_install_whatsapp_mcp=install_whatsapp_mcp,
+        )
+
+    # Step 7: Health Check
     if not non_interactive:
-        print_step(5, 5, "Health Check")
+        print_step(6, 6, "Health Check")
         
         # Check auth status
         auth_manager.print_status()
@@ -470,6 +488,221 @@ async def run_onboard(
         print()
     
     return True
+
+
+def _run_cmd(cmd: list[str], *, cwd: Optional[Path] = None) -> int:
+    try:
+        res = subprocess.run(cmd, cwd=str(cwd) if cwd else None)
+        return int(res.returncode)
+    except FileNotFoundError:
+        return 127
+    except Exception:
+        return 1
+
+
+def _print_missing_exe(name: str, *, hint: Optional[str] = None) -> None:
+    msg = f"âš ï¸  Missing dependency: '{name}' is not on PATH."
+    if hint:
+        msg += f"\n   {hint}"
+    print(msg)
+
+
+def _install_windows_mcp() -> bool:
+    print("\nðŸªŸ Installing Windows-MCP (windows-mcp)...")
+    rc = _run_cmd([sys.executable, "-m", "pip", "install", "--upgrade", "windows-mcp"])
+    if rc != 0:
+        print("âš ï¸  Failed to install windows-mcp via pip.")
+        return False
+    rc2 = _run_cmd(["windows-mcp", "--help"])
+    if rc2 != 0:
+        print("âš ï¸  windows-mcp installed but could not be executed from PATH.")
+        return False
+    print("âœ… Windows-MCP installed.")
+    return True
+
+
+def _ensure_uv_available() -> bool:
+    if shutil.which("uv"):
+        return True
+    print("\nðŸ”§ Installing uv...")
+    rc = _run_cmd([sys.executable, "-m", "pip", "install", "--upgrade", "uv"])
+    return rc == 0 and bool(shutil.which("uv"))
+
+
+def _install_whatsapp_mcp(*, launch_bridge: bool) -> bool:
+    print("\nðŸ’¬ Installing WhatsApp-MCP (lharries/whatsapp-mcp)...")
+    if not shutil.which("git"):
+        _print_missing_exe("git", hint="Install Git for Windows, then re-run onboarding.")
+        return False
+
+    vendor_dir = PROJECT_ROOT / "data" / "vendor" / "whatsapp-mcp"
+    vendor_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    if (vendor_dir / ".git").exists():
+        print(f"ðŸ”„ Updating repo: {vendor_dir}")
+        _run_cmd(["git", "-C", str(vendor_dir), "pull", "--ff-only"])
+    else:
+        print(f"ðŸ“¦ Cloning repo to: {vendor_dir}")
+        rc = _run_cmd(["git", "clone", "https://github.com/lharries/whatsapp-mcp", str(vendor_dir)])
+        if rc != 0:
+            print("âš ï¸  Failed to clone whatsapp-mcp repo.")
+            return False
+
+    if not _ensure_uv_available():
+        _print_missing_exe("uv", hint="Install uv, then re-run onboarding.")
+        return False
+
+    server_dir = vendor_dir / "whatsapp-mcp-server"
+    if server_dir.exists():
+        print("ðŸ§ª Warming up Python dependencies (uv sync)...")
+        _run_cmd(["uv", "--directory", str(server_dir), "sync"])
+    else:
+        print("âš ï¸  Expected server directory not found:", server_dir)
+
+    if launch_bridge:
+        bridge_dir = vendor_dir / "whatsapp-bridge"
+        if not bridge_dir.exists():
+            print("âš ï¸  Expected bridge directory not found:", bridge_dir)
+        elif not shutil.which("go"):
+            _print_missing_exe(
+                "go",
+                hint=(
+                    "Install Go, then run the bridge:\n"
+                    f"   cd \"{bridge_dir}\"\n"
+                    "   go env -w CGO_ENABLED=1\n"
+                    "   go run main.go"
+                ),
+            )
+        else:
+            print("ðŸš€ Launching WhatsApp bridge in a new console (scan QR code there)...")
+            creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            subprocess.Popen(
+                ["cmd.exe", "/k", "go env -w CGO_ENABLED=1 && go run main.go"],
+                cwd=str(bridge_dir),
+                creationflags=creationflags,
+            )
+
+    print("âœ… WhatsApp-MCP setup complete (repo present).")
+    return True
+
+
+async def _mcp_smoke_check_windows(*, timeout_seconds: float = 10.0) -> None:
+    try:
+        from intelclaw.mcp.connection import MCPServerConnection, MCPServerSpec
+    except Exception as e:
+        print(f"âš ï¸  MCP smoke check skipped (mcp client unavailable): {e}")
+        return
+
+    spec = MCPServerSpec(
+        skill_id="windows",
+        server_id="windows_mcp",
+        transport="stdio",
+        command="windows-mcp",
+        args=["--transport", "stdio"],
+        env={"ANONYMIZED_TELEMETRY": "false"},
+        cwd=None,
+        tool_namespace="windows",
+        tool_allowlist=[],
+        tool_denylist=[],
+    )
+    conn = MCPServerConnection(spec)
+    try:
+        tools = await asyncio.wait_for(conn.list_tools(), timeout=float(timeout_seconds))
+        print(f"âœ… Windows MCP smoke check: {len(list(tools or []))} tools detected.")
+    except Exception as e:
+        print(f"âš ï¸  Windows MCP smoke check failed: {e}")
+    finally:
+        try:
+            await asyncio.wait_for(conn.shutdown(), timeout=3.0)
+        except Exception:
+            pass
+
+
+async def _mcp_smoke_check_whatsapp(*, timeout_seconds: float = 10.0) -> None:
+    vendor_dir = PROJECT_ROOT / "data" / "vendor" / "whatsapp-mcp"
+    server_dir = vendor_dir / "whatsapp-mcp-server"
+    if not server_dir.exists():
+        return
+    if not shutil.which("uv"):
+        return
+    try:
+        from intelclaw.mcp.connection import MCPServerConnection, MCPServerSpec
+    except Exception:
+        return
+
+    spec = MCPServerSpec(
+        skill_id="whatsapp",
+        server_id="whatsapp_mcp",
+        transport="stdio",
+        command="uv",
+        args=["run", "main.py"],
+        env={},
+        cwd=server_dir,
+        tool_namespace="whatsapp",
+        tool_allowlist=[],
+        tool_denylist=[],
+    )
+    conn = MCPServerConnection(spec)
+    try:
+        tools = await asyncio.wait_for(conn.list_tools(), timeout=float(timeout_seconds))
+        print(f"âœ… WhatsApp MCP smoke check: {len(list(tools or []))} tools detected.")
+    except Exception as e:
+        print(f"âš ï¸  WhatsApp MCP smoke check failed: {e}")
+    finally:
+        try:
+            await asyncio.wait_for(conn.shutdown(), timeout=3.0)
+        except Exception:
+            pass
+
+
+async def _setup_skills_and_mcp(
+    *,
+    non_interactive: bool,
+    force_install_windows_mcp: Optional[bool],
+    force_install_whatsapp_mcp: Optional[bool],
+) -> None:
+    # Decide actions
+    if non_interactive:
+        do_windows = True if force_install_windows_mcp is None else bool(force_install_windows_mcp)
+        do_whatsapp = bool(force_install_whatsapp_mcp) if force_install_whatsapp_mcp is not None else False
+        launch_bridge = False
+    else:
+        do_windows = True if force_install_windows_mcp else prompt_yes_no("Install Windows-MCP (windows-mcp) now?", default=True)
+        do_whatsapp = True if force_install_whatsapp_mcp else prompt_yes_no(
+            "Install WhatsApp-MCP (lharries/whatsapp-mcp) now?",
+            default=True,
+        )
+        launch_bridge = False
+        if do_whatsapp:
+            launch_bridge = prompt_yes_no(
+                "Launch WhatsApp bridge in a new console now (QR login)?",
+                default=True,
+            )
+
+    # Execute (best-effort)
+    try:
+        if do_windows:
+            _install_windows_mcp()
+    except Exception as e:
+        print(f"âš ï¸  Windows-MCP install failed: {e}")
+
+    try:
+        if do_whatsapp:
+            _install_whatsapp_mcp(launch_bridge=launch_bridge)
+    except Exception as e:
+        print(f"âš ï¸  WhatsApp-MCP install failed: {e}")
+
+    # Best-effort MCP smoke checks (non-fatal)
+    try:
+        if do_windows:
+            await _mcp_smoke_check_windows()
+    except Exception:
+        pass
+    try:
+        if do_whatsapp:
+            await _mcp_smoke_check_whatsapp()
+    except Exception:
+        pass
 
 
 async def _create_bootstrap_files(workspace_dir: Path) -> None:
@@ -574,6 +807,23 @@ def cli_onboard():
         action="store_true",
         help="Skip authentication step"
     )
+    parser.add_argument(
+        "--skip-skills",
+        action="store_true",
+        help="Skip skill/MCP setup steps"
+    )
+    parser.add_argument(
+        "--install-windows-mcp",
+        action="store_true",
+        default=None,
+        help="Install windows-mcp during onboarding"
+    )
+    parser.add_argument(
+        "--install-whatsapp-mcp",
+        action="store_true",
+        default=None,
+        help="Install whatsapp-mcp during onboarding"
+    )
     
     args = parser.parse_args()
     
@@ -583,6 +833,9 @@ def cli_onboard():
         workspace=args.workspace,
         gateway_port=args.gateway_port,
         skip_auth=args.skip_auth,
+        skip_skills=args.skip_skills,
+        install_windows_mcp=args.install_windows_mcp,
+        install_whatsapp_mcp=args.install_whatsapp_mcp,
     ))
 
 

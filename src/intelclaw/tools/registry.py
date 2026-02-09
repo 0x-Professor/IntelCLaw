@@ -6,18 +6,23 @@ Manages tool discovery, registration, and execution.
 
 import asyncio
 import json
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 from langchain_core.tools import BaseTool as LangChainBaseTool
 from loguru import logger
 
 from intelclaw.tools.base import BaseTool, ToolDefinition, ToolResult, ToolCategory
 from intelclaw.tools.converter import convert_tools_to_openai, convert_tools_to_mcp
+from intelclaw.mcp.manager import MCPManager, MCPTimeouts
+from intelclaw.mcp.connection import MCPServerSpec
 
 if TYPE_CHECKING:
     from intelclaw.config.manager import ConfigManager
     from intelclaw.memory.manager import MemoryManager
     from intelclaw.security.manager import SecurityManager
+    from intelclaw.skills.manager import SkillManager
+    from intelclaw.core.events import EventBus
 
 
 class ToolRegistry:
@@ -37,6 +42,9 @@ class ToolRegistry:
         config: "ConfigManager",
         security: "SecurityManager",
         memory: Optional["MemoryManager"] = None,
+        *,
+        skills: Optional["SkillManager"] = None,
+        event_bus: Optional["EventBus"] = None,
     ):
         """
         Initialize tool registry.
@@ -48,13 +56,50 @@ class ToolRegistry:
         self.config = config
         self.security = security
         self.memory = memory
+        self.skills = skills
+        self.event_bus = event_bus
         
         self._tools: Dict[str, BaseTool] = {}
         self._definitions: Dict[str, ToolDefinition] = {}
         self._call_counts: Dict[str, int] = {}
         self._initialized = False
+        self._revision = 0
+
+        # MCP integration
+        def _timeout(key: str, default: float) -> float:
+            try:
+                return float(self.config.get(key, default))
+            except Exception:
+                return float(default)
+
+        self._mcp = MCPManager(
+            timeouts=MCPTimeouts(
+                start_seconds=_timeout("mcp.timeouts.start_seconds", 30.0),
+                list_tools_seconds=_timeout("mcp.timeouts.list_tools_seconds", 30.0),
+                call_tool_seconds=_timeout("mcp.timeouts.call_tool_seconds", 300.0),
+            )
+        )
+        self._mcp_reload_lock = asyncio.Lock()
+        self._mcp_tool_names: Set[str] = set()
+        self._mcp_tools_by_skill: Dict[str, List[str]] = {}
+        self._mcp_tool_to_skill: Dict[str, str] = {}
+        self._mcp_tool_to_server: Dict[str, Tuple[str, str]] = {}
+
+        # LangChain wrapper cache
+        self._lc_cache_revision = -1
+        self._lc_tool_cache: Dict[str, LangChainBaseTool] = {}
         
         logger.debug("ToolRegistry created")
+
+    @property
+    def revision(self) -> int:
+        return int(self._revision)
+
+    def _bump_revision(self) -> None:
+        self._revision += 1
+        # Invalidate LangChain cache on registry changes
+        self._lc_tool_cache.clear()
+        self._lc_cache_revision = self._revision
     
     async def initialize(self) -> None:
         """Initialize and register built-in tools."""
@@ -67,6 +112,13 @@ class ToolRegistry:
         mcp_config = self.config.get("mcp", {})
         if mcp_config.get("enabled", True):
             await self._load_mcp_tools()
+
+        # Auto-reload MCP tools on skill changes (best-effort)
+        if self.event_bus:
+            try:
+                await self.event_bus.subscribe("skills.changed", self._on_skills_changed)
+            except Exception as e:
+                logger.debug(f"Failed to subscribe to skills.changed: {e}")
         
         self._initialized = True
         logger.success(f"Tool registry initialized with {len(self._tools)} tools")
@@ -74,6 +126,10 @@ class ToolRegistry:
     async def shutdown(self) -> None:
         """Shutdown tool registry."""
         logger.info("Shutting down tool registry...")
+        try:
+            await self._mcp.shutdown_unused(set())
+        except Exception:
+            pass
         self._tools.clear()
         self._definitions.clear()
         logger.info("Tool registry shutdown complete")
@@ -84,6 +140,7 @@ class ToolRegistry:
         self._tools[definition.name] = tool
         self._definitions[definition.name] = definition
         self._call_counts[definition.name] = 0
+        self._bump_revision()
         logger.debug(f"Registered tool: {definition.name}")
     
     def unregister(self, name: str) -> bool:
@@ -92,6 +149,7 @@ class ToolRegistry:
             del self._tools[name]
             del self._definitions[name]
             del self._call_counts[name]
+            self._bump_revision()
             return True
         return False
     
@@ -105,7 +163,9 @@ class ToolRegistry:
     
     def list_tools(
         self,
-        category: Optional[ToolCategory] = None
+        category: Optional[ToolCategory] = None,
+        *,
+        allowlist: Optional[Set[str]] = None,
     ) -> List[ToolDefinition]:
         """
         List all registered tools.
@@ -117,11 +177,35 @@ class ToolRegistry:
             List of tool definitions
         """
         definitions = list(self._definitions.values())
+        if allowlist is not None:
+            allowed = set(allowlist)
+            definitions = [d for d in definitions if d.name in allowed]
         
         if category:
             definitions = [d for d in definitions if d.category == category]
         
         return definitions
+
+    def get_mcp_tool_names_for_skill(self, skill_id: str) -> List[str]:
+        return list(self._mcp_tools_by_skill.get(str(skill_id or "").strip(), []))
+
+    def get_skill_id_for_tool(self, tool_name: str) -> Optional[str]:
+        return self._mcp_tool_to_skill.get(str(tool_name or "").strip())
+
+    def get_mcp_server_health(self, skill_id: str, server_id: str) -> Dict[str, Any]:
+        """Best-effort health snapshot for a given MCP server key."""
+        try:
+            h = self._mcp.get_health_for_key(skill_id, server_id)
+            return {"healthy": bool(h.healthy), "last_error": h.last_error}
+        except Exception as e:
+            return {"healthy": False, "last_error": str(e)}
+
+    async def _on_skills_changed(self, event: Any) -> None:
+        # Best-effort: keep MCP tools synced with enabled skills.
+        try:
+            await self.reload_mcp_tools()
+        except Exception as e:
+            logger.debug(f"Auto MCP reload on skills.changed failed: {e}")
     
     async def execute(
         self,
@@ -308,75 +392,102 @@ class ToolRegistry:
 
         return {"results": output_results, "summary": summary}
     
-    async def get_langchain_tools(self) -> List[LangChainBaseTool]:
+    async def get_langchain_tools(self, *, allowlist: Optional[Set[str]] = None) -> List[LangChainBaseTool]:
         """
         Convert registered tools to LangChain tools.
         
         Returns:
             List of LangChain-compatible tools
         """
-        langchain_tools = []
-        
-        for name, internal_tool in self._tools.items():
+        return await self.get_langchain_tools_filtered(allowlist=allowlist)
+
+    async def get_langchain_tools_filtered(
+        self, *, allowlist: Optional[Set[str]] = None
+    ) -> List[LangChainBaseTool]:
+        """
+        Convert registered tools to LangChain tools, optionally filtered by allowlist.
+        """
+        if self._lc_cache_revision != self._revision:
+            self._lc_tool_cache.clear()
+            self._lc_cache_revision = self._revision
+
+        wanted = set(allowlist) if allowlist is not None else set(self._tools.keys())
+        out: List[LangChainBaseTool] = []
+
+        for name in sorted(wanted):
+            internal_tool = self._tools.get(name)
+            if not internal_tool:
+                continue
+
+            cached = self._lc_tool_cache.get(name)
+            if cached is not None:
+                out.append(cached)
+                continue
+
             definition = internal_tool.definition
-            
-            # Create async wrapper
-            async def make_executor(t=internal_tool):
-                async def executor(**kwargs):
-                    result = await t.safe_execute(**kwargs)
-                    if result.success:
-                        return result.data
-                    return f"Error: {result.error}"
-                return executor
-            
-            executor = await make_executor()
-            
+
+            tool_ref = internal_tool
+
+            async def executor(**kwargs):
+                result = await tool_ref.safe_execute(**kwargs)
+                if result.success:
+                    return result.data
+                return f"Error: {result.error}"
+
             # Build args_schema from definition parameters
             args_schema = None
             if definition.parameters and "properties" in definition.parameters:
-                from pydantic import create_model, Field
-                from typing import Optional
-                
-                fields = {}
-                props = definition.parameters.get("properties", {})
-                required = definition.parameters.get("required", [])
-                
+                from pydantic import Field, create_model
+                from typing import Optional as TypingOptional
+
+                fields: Dict[str, Any] = {}
+                props = definition.parameters.get("properties", {}) or {}
+                required = set(definition.parameters.get("required", []) or [])
+
                 for prop_name, prop_info in props.items():
-                    prop_type = str  # Default to string
-                    if prop_info.get("type") == "integer":
-                        prop_type = int
-                    elif prop_info.get("type") == "boolean":
-                        prop_type = bool
-                    elif prop_info.get("type") == "number":
-                        prop_type = float
-                    
-                    default_val = prop_info.get("default", ...)
+                    prop_type: Any = str  # Default to string
+                    if isinstance(prop_info, dict):
+                        if prop_info.get("type") == "integer":
+                            prop_type = int
+                        elif prop_info.get("type") == "boolean":
+                            prop_type = bool
+                        elif prop_info.get("type") == "number":
+                            prop_type = float
+
+                    default_val = prop_info.get("default", ...) if isinstance(prop_info, dict) else ...
                     if prop_name not in required and default_val is ...:
                         default_val = None
-                        prop_type = Optional[prop_type]
-                    
-                    fields[prop_name] = (prop_type, Field(
-                        default=default_val,
-                        description=prop_info.get("description", "")
-                    ))
-                
+                        prop_type = TypingOptional[prop_type]
+
+                    fields[prop_name] = (
+                        prop_type,
+                        Field(default=default_val, description=(prop_info or {}).get("description", "") if isinstance(prop_info, dict) else ""),
+                    )
+
                 if fields:
                     args_schema = create_model(f"{definition.name}Args", **fields)
-            
-            # Use StructuredTool for proper async support
+
             from langchain_core.tools import StructuredTool
-            
+
+            def sync_executor(**kwargs):
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    return asyncio.run(executor(**kwargs))
+                raise RuntimeError("Synchronous tool execution is not supported in an active event loop")
+
             lc_tool = StructuredTool.from_function(
-                func=lambda **kw: asyncio.run(executor(**kw)),
+                func=sync_executor,
                 coroutine=executor,
                 name=definition.name,
                 description=definition.description,
                 args_schema=args_schema,
             )
-            
-            langchain_tools.append(lc_tool)
-        
-        return langchain_tools
+
+            self._lc_tool_cache[name] = lc_tool
+            out.append(lc_tool)
+
+        return out
 
     def get_openai_tools(self) -> List[Dict[str, Any]]:
         """
@@ -492,9 +603,106 @@ class ToolRegistry:
     
     async def _load_mcp_tools(self) -> None:
         """Load tools from MCP servers."""
-        # MCP integration would go here
-        # For now, this is a placeholder
-        logger.debug("MCP tool loading not yet implemented")
+        async with self._mcp_reload_lock:
+            specs = await self._collect_enabled_mcp_specs()
+            await self._register_mcp_tools(specs)
+            await self._mcp.shutdown_unused({s.key() for s in specs})
+
+    async def reload_mcp_tools(self) -> None:
+        """Reload MCP tools according to currently enabled skills."""
+        async with self._mcp_reload_lock:
+            # Unregister previous MCP tools
+            for name in list(self._mcp_tool_names):
+                try:
+                    self.unregister(name)
+                except Exception:
+                    pass
+
+            self._mcp_tool_names.clear()
+            self._mcp_tools_by_skill.clear()
+            self._mcp_tool_to_skill.clear()
+            self._mcp_tool_to_server.clear()
+
+            specs = await self._collect_enabled_mcp_specs()
+            await self._register_mcp_tools(specs)
+            await self._mcp.shutdown_unused({s.key() for s in specs})
+
+    async def _collect_enabled_mcp_specs(self) -> List[MCPServerSpec]:
+        if not self.skills:
+            return []
+        try:
+            entries = await self.skills.get_enabled_mcp_server_specs()
+        except Exception as e:
+            logger.debug(f"Failed to get enabled MCP server specs: {e}")
+            return []
+
+        specs: List[MCPServerSpec] = []
+        for skill_id, server, skill_dir in entries:
+            try:
+                cwd_val = getattr(server, "cwd", None)
+                cwd_path: Optional[Path] = None
+                if cwd_val:
+                    p = Path(str(cwd_val))
+                    cwd_path = p if p.is_absolute() else (Path(skill_dir) / p).resolve()
+
+                specs.append(
+                    MCPServerSpec(
+                        skill_id=str(skill_id),
+                        server_id=str(server.id),
+                        transport=str(server.transport),
+                        command=str(server.command),
+                        args=[str(a) for a in (server.args or [])],
+                        env={str(k): str(v) for k, v in (server.env or {}).items()},
+                        cwd=cwd_path,
+                        tool_namespace=str(server.tool_namespace or "default"),
+                        tool_allowlist=[str(x) for x in (server.tool_allowlist or [])],
+                        tool_denylist=[str(x) for x in (server.tool_denylist or [])],
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Skipping MCP server spec due to parse error: {e}")
+
+        return specs
+
+    async def _register_mcp_tools(self, specs: List[MCPServerSpec]) -> None:
+        if not specs:
+            return
+
+        from intelclaw.tools.mcp_tool import MCPRemoteTool
+
+        for spec in specs:
+            try:
+                tools = await self._mcp.get_tools(spec, refresh=True)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to list MCP tools for {spec.skill_id}/{spec.server_id}: {e}"
+                )
+                continue
+
+            for t in tools:
+                try:
+                    mcp_tool_name = getattr(t, "name", None) or ""
+                    if not str(mcp_tool_name).strip():
+                        continue
+                    description = getattr(t, "description", None) or ""
+                    input_schema = getattr(t, "inputSchema", None) or {}
+
+                    remote = MCPRemoteTool(
+                        mcp_manager=self._mcp,
+                        spec=spec,
+                        mcp_tool_name=str(mcp_tool_name),
+                        description=str(description or ""),
+                        input_schema=input_schema if isinstance(input_schema, dict) else {},
+                    )
+
+                    self.register(remote)
+                    name = remote.definition.name
+                    self._mcp_tool_names.add(name)
+                    self._mcp_tool_to_skill[name] = spec.skill_id
+                    self._mcp_tool_to_server[name] = spec.key()
+                    self._mcp_tools_by_skill.setdefault(spec.skill_id, []).append(name)
+                except Exception as e:
+                    logger.debug(f"Failed to register MCP tool: {e}")
     
     def reset_rate_limits(self) -> None:
         """Reset all rate limit counters."""

@@ -1649,6 +1649,335 @@ code, pre, .mono {
     transform: translateX(20px);
 }
 
+/* ===== SKILLS / INBOX / MODALS ===== */
+.header-btn.has-badge {
+    position: relative;
+}
+
+.btn-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: var(--accent);
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 999px;
+    min-width: 18px;
+    text-align: center;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.panel-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.panel-btn {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.panel-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-light);
+}
+
+.panel-btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.panel-btn.primary:hover {
+    filter: brightness(1.05);
+}
+
+.panel-hint {
+    margin-top: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.panel-hint code {
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    padding: 1px 4px;
+    border-radius: 4px;
+}
+
+.skills-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.skill-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    border: 1px solid var(--border);
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.skill-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.skill-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.skill-icon {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.skill-name {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.skill-version {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.skill-desc {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.35;
+}
+
+.skill-sub {
+    margin-top: 8px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.skill-health.healthy {
+    color: #3ddc97;
+}
+
+.skill-health.unhealthy {
+    color: #ff6b6b;
+}
+
+.inbox-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.inbox-item {
+    border: 1px solid var(--border);
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.inbox-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.inbox-agent,
+.inbox-time {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.inbox-kind {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.inbox-kind.completed {
+    border-color: rgba(61, 220, 151, 0.4);
+    color: #3ddc97;
+}
+
+.inbox-kind.error {
+    border-color: rgba(255, 107, 107, 0.4);
+    color: #ff6b6b;
+}
+
+.inbox-kind.progress {
+    border-color: rgba(120, 170, 255, 0.4);
+    color: #78aaff;
+}
+
+.inbox-title {
+    margin-top: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.inbox-body {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+}
+
+.modal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+}
+
+.modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.modal-card {
+    position: relative;
+    width: min(720px, calc(100vw - 40px));
+    max-height: calc(100vh - 60px);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.modal-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.modal-title {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+
+.modal-close:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 16px;
+    overflow: auto;
+}
+
+.form-input.code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+}
+
+.modal-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.modal-error {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 107, 107, 0.4);
+    background: rgba(255, 107, 107, 0.08);
+    color: #ff6b6b;
+    border-radius: 10px;
+    font-size: 12px;
+}
+
+.toast-container {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 250;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.toast {
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    padding: 12px 14px;
+}
+
+.toast.success {
+    border-color: rgba(61, 220, 151, 0.4);
+}
+
+.toast.error {
+    border-color: rgba(255, 107, 107, 0.4);
+}
+
+.toast-title {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.toast-body {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+}
+
 /* ===== RESPONSIVE ===== */
 @media (max-width: 1200px) {
     .right-panel {
