@@ -407,6 +407,17 @@ security:
   max_file_size_mb: 100
   allowed_directories: []  # All directories allowed
   audit_log_path: data/audit.log
+
+# WhatsApp (lharries/whatsapp-mcp)
+whatsapp:
+  bridge_messages_db_path: data/vendor/whatsapp-mcp/whatsapp-bridge/store/messages.db
+  inbound:
+    enabled: false
+    context_messages: 50
+    poll_seconds: 5
+    min_reply_interval_seconds: 15
+    allowlist_numbers: []
+    allowlist_jids: []
 """
     return config
 
@@ -540,7 +551,11 @@ def _ensure_pip_package(package: str) -> bool:
     if ok:
         # Best-effort: ensure this Python's Scripts dir is on PATH for subsequent calls.
         try:
-            _prepend_path(str(Path(sys.executable).resolve().parent))
+            py_dir = Path(sys.executable).resolve().parent
+            scripts_dir = py_dir / "Scripts"
+            if scripts_dir.exists():
+                _prepend_path(str(scripts_dir))
+            _prepend_path(str(py_dir))
         except Exception:
             pass
     return ok
@@ -593,6 +608,10 @@ def _ensure_go_available() -> bool:
                 "--accept-source-agreements",
             ]
         )
+        for exe in candidates:
+            if exe.exists():
+                _prepend_path(str(exe.parent))
+                return True
     return bool(shutil.which("go"))
 
 

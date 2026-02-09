@@ -12,6 +12,10 @@ This skill depends on the **Windows** skill. If WhatsApp MCP tools are unavailab
 ## Workflow
 1. Prefer WhatsApp MCP tools under the `mcp_whatsapp__*` namespace when they are available.
 2. Resolve the correct chat/contact (avoid ambiguous recipients).
+   - If user provides a person name (not a number), first use `contacts_lookup` to resolve to a number/JID.
+   - If not found, optionally use `mcp_whatsapp__search_contacts` to find a match, then save it with `contacts_upsert`.
+   - IMPORTANT: `recipient` phone numbers must be digits only (no `+`, spaces, or symbols).
+   - Prefer using a chat JID (e.g. `923...@s.whatsapp.net` or `...@lid`) when available.
 3. Draft message.
 4. **Confirm before sending** if:
    - recipient is ambiguous,

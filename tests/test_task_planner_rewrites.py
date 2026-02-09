@@ -19,6 +19,16 @@ def test_rewrite_windows_app_url_to_shell():
     assert args["command"] == "Start-Process chrome 'https://www.youtube.com'"
 
 
+def test_rewrite_legacy_app_tool_url_to_shell():
+    planner = TaskPlanner(tools=_DummyTools({"mcp_windows__shell"}))
+    tool, args = planner._rewrite_common_tool_invocations(
+        "app_tool",
+        {"app": "chrome", "url": "https://www.youtube.com"},
+    )
+    assert tool == "mcp_windows__shell"
+    assert args["command"] == "Start-Process chrome 'https://www.youtube.com'"
+
+
 def test_rewrite_windows_shell_script_to_command():
     planner = TaskPlanner(tools=_DummyTools(set()))
     tool, args = planner._rewrite_common_tool_invocations(
@@ -38,4 +48,3 @@ def test_rewrite_windows_app_strips_url_when_no_fallback_available():
     )
     assert tool == "mcp_windows__app"
     assert "url" not in args
-

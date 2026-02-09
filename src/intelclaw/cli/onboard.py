@@ -567,10 +567,13 @@ def _install_whatsapp_mcp(*, launch_bridge: bool) -> bool:
             _print_missing_exe(
                 "go",
                 hint=(
-                    "Install Go, then run the bridge:\n"
+                    "Install Go (and a C compiler like gcc for go-sqlite3), then run the bridge:\n"
+                    f"   powershell -NoProfile -ExecutionPolicy Bypass -File \"{(PROJECT_ROOT / 'scripts' / 'run_whatsapp_bridge.ps1')}\" -RepoRoot \"{PROJECT_ROOT}\"\n"
+                    "   (or manually)\n"
                     f"   cd \"{bridge_dir}\"\n"
                     "   go env -w CGO_ENABLED=1\n"
-                    "   go run main.go"
+                    "   go mod download\n"
+                    "   go run ."
                 ),
             )
         else:
@@ -594,7 +597,7 @@ def _install_whatsapp_mcp(*, launch_bridge: bool) -> bool:
                 )
             else:
                 subprocess.Popen(
-                    ["cmd.exe", "/k", "go env -w CGO_ENABLED=1 && go run main.go"],
+                    ["cmd.exe", "/k", "go env -w CGO_ENABLED=1 && go mod download && go run ."],
                     cwd=str(bridge_dir),
                     creationflags=creationflags,
                 )

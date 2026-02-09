@@ -5,6 +5,7 @@ MCPRemoteTool - expose an MCP server tool as an IntelCLaw tool.
 from __future__ import annotations
 
 import re
+import asyncio
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -62,6 +63,34 @@ def _flatten_mcp_content(content: Any) -> str:
     return "\n".join([p for p in parts if p])
 
 
+def _payload_indicates_failure(data: Any) -> Optional[str]:
+    """
+    Some MCP servers return a structured payload with {success: false, message: "..."} while
+    the MCP call itself is not marked as isError. Treat these as tool failures so the rest
+    of the agent stack can retry/handle appropriately.
+    """
+    if not isinstance(data, dict):
+        return None
+    if data.get("success") is False:
+        msg = data.get("message") or data.get("error") or "MCP tool reported success=false"
+        return str(msg)
+    return None
+
+
+def _normalize_whatsapp_recipient(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    s = value.strip()
+    if not s:
+        return s
+    # If it's already a JID, keep as-is.
+    if "@" in s:
+        return s
+    # Strip any formatting like +, spaces, hyphens, parentheses.
+    digits = re.sub(r"\D+", "", s)
+    return digits or s
+
+
 class MCPRemoteTool(BaseTool):
     def __init__(
         self,
@@ -106,7 +135,21 @@ class MCPRemoteTool(BaseTool):
 
     async def execute(self, **kwargs) -> ToolResult:
         try:
-            res = await self._mcp.call(self._spec, self._mcp_tool_name, args=dict(kwargs or {}))
+            call_args = dict(kwargs or {})
+
+            # Skill-specific pre-processing for common WhatsApp inputs.
+            if normalize_tool_name(self._spec.tool_namespace) == "whatsapp" and self._mcp_tool_name in {
+                "send_message",
+                "send_file",
+                "send_audio_message",
+            }:
+                if "recipient" in call_args:
+                    call_args["recipient"] = _normalize_whatsapp_recipient(call_args.get("recipient"))
+
+            async def _call_once() -> Any:
+                return await self._mcp.call(self._spec, self._mcp_tool_name, args=dict(call_args or {}))
+
+            res = await _call_once()
 
             is_error = bool(getattr(res, "isError", False))
             structured = getattr(res, "structuredContent", None)
@@ -125,6 +168,58 @@ class MCPRemoteTool(BaseTool):
                 )
 
             data: Any = structured if structured is not None else _flatten_mcp_content(content)
+
+            # Normalize "success: false" payloads into tool failures.
+            payload_error = _payload_indicates_failure(data)
+            if payload_error:
+                # Best-effort retry for transient WhatsApp usync/device-list timeouts.
+                if (
+                    normalize_tool_name(self._spec.tool_namespace) == "whatsapp"
+                    and any(x in payload_error.lower() for x in ("info query timed out", "failed to get device list", "usync query"))
+                ):
+                    try:
+                        await asyncio.sleep(3.0)
+                        res2 = await _call_once()
+                        is_error2 = bool(getattr(res2, "isError", False))
+                        structured2 = getattr(res2, "structuredContent", None)
+                        content2 = getattr(res2, "content", None)
+                        if is_error2:
+                            msg2 = _flatten_mcp_content(content2) or payload_error
+                            return ToolResult(
+                                success=False,
+                                error=msg2,
+                                metadata={
+                                    "skill_id": self._spec.skill_id,
+                                    "server_id": self._spec.server_id,
+                                    "mcp_tool_name": self._mcp_tool_name,
+                                },
+                            )
+                        data2: Any = structured2 if structured2 is not None else _flatten_mcp_content(content2)
+                        payload_error2 = _payload_indicates_failure(data2)
+                        if not payload_error2:
+                            return ToolResult(
+                                success=True,
+                                data=data2,
+                                metadata={
+                                    "skill_id": self._spec.skill_id,
+                                    "server_id": self._spec.server_id,
+                                    "mcp_tool_name": self._mcp_tool_name,
+                                },
+                            )
+                        payload_error = payload_error2
+                    except Exception:
+                        pass
+
+                return ToolResult(
+                    success=False,
+                    error=payload_error,
+                    metadata={
+                        "skill_id": self._spec.skill_id,
+                        "server_id": self._spec.server_id,
+                        "mcp_tool_name": self._mcp_tool_name,
+                    },
+                )
+
             return ToolResult(
                 success=True,
                 data=data,
@@ -145,4 +240,3 @@ class MCPRemoteTool(BaseTool):
                     "mcp_tool_name": self._mcp_tool_name,
                 },
             )
-

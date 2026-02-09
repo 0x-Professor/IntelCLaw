@@ -12,6 +12,7 @@ This module implements a sophisticated task planning system that:
 from __future__ import annotations
 
 import asyncio
+import re
 import json
 import time
 import uuid
@@ -258,6 +259,10 @@ IMPORTANT TOOL MAPPING:
 - For web search: use "tavily_search" with args {{"query": "search terms"}}
 - For web scraping: use "web_scrape" with args {{"url": "..."}}
 
+### Contacts
+- To look up a saved contact (data/contacts.md): use "contacts_lookup" with args {{"query": "Alice"}}
+- To add/update a contact: use "contacts_upsert" with args {{"name": "Alice", "phone": "+923171156353", "inbound_allowed": true}}
+
 ### Shell & Code
 - For running commands: use "shell_command" with args {{"command": "..."}}
 - For PowerShell: use "powershell" with args {{"script": "..."}}
@@ -339,6 +344,11 @@ IMPORTANT TOOL MAPPING:
   - Do NOT pass "app" or "url" to "mcp_windows__app" (it doesn't accept those).
 - Open a URL in a browser: use "mcp_windows__shell" with args {{"command": "Start-Process chrome 'https://www.youtube.com'"}}
 - Run an arbitrary command: use "mcp_windows__shell" with args {{"command": "...", "timeout": 10}}
+
+### WhatsApp MCP (mcp_whatsapp__*)
+- Phone numbers must be digits only (no "+", spaces, or symbols). Example: "923171156353"
+- Prefer using a chat JID when you have it (e.g. "923171156353@s.whatsapp.net" or "...@lid").
+- Send a message: use "mcp_whatsapp__send_message" with args {{"recipient": "923171156353", "message": "hi"}}
 
 ### Other
 - For taking screenshot: use "screenshot"
@@ -868,6 +878,39 @@ Return a JSON object:
         if not name:
             return name, args
 
+        # Legacy/generic: Some planners call a non-MCP `app_tool` with {app, url}
+        # to mean "open <url> in <app>". Rewrite to an actually supported tool.
+        if name == "app_tool":
+            if "app" in args and "name" not in args:
+                args["name"] = args.pop("app")
+
+            url = args.get("url")
+            if url:
+                url_str = str(url)
+                browser = str(args.get("name") or "chrome")
+
+                try:
+                    if self.tools and hasattr(self.tools, "get_tool") and self.tools.get_tool("mcp_windows__shell"):
+                        return "mcp_windows__shell", {"command": f"Start-Process {browser} '{url_str}'"}
+                except Exception:
+                    pass
+
+                try:
+                    if self.tools and hasattr(self.tools, "get_tool") and self.tools.get_tool("powershell"):
+                        return "powershell", {"script": f"Start-Process {browser} '{url_str}'"}
+                except Exception:
+                    pass
+
+                try:
+                    if self.tools and hasattr(self.tools, "get_tool") and self.tools.get_tool("launch_app"):
+                        return "launch_app", {"target": url_str}
+                except Exception:
+                    pass
+
+                # If we can't rewrite, at least strip url to avoid schema validation errors.
+                args.pop("url", None)
+            return name, args
+
         # Windows MCP: App tool does not accept URL navigation.
         if name == "mcp_windows__app":
             # Common mistake: app -> name
@@ -914,6 +957,20 @@ Return a JSON object:
                     args["command"] = args.pop("cmd")
             if "timeout" not in args and "timeout_seconds" in args:
                 args["timeout"] = args.pop("timeout_seconds")
+            return name, args
+
+        # WhatsApp MCP: normalize recipient phone numbers (strip '+' and formatting).
+        if name in {"mcp_whatsapp__send_message", "mcp_whatsapp__send_file", "mcp_whatsapp__send_audio_message"}:
+            if "recipient" not in args:
+                for alt in ("to", "phone", "phone_number", "jid"):
+                    if alt in args:
+                        args["recipient"] = args.pop(alt)
+                        break
+            rec = args.get("recipient")
+            if isinstance(rec, str):
+                rec_s = rec.strip()
+                if rec_s and "@" not in rec_s:
+                    args["recipient"] = re.sub(r"\\D+", "", rec_s)
             return name, args
 
         return name, args

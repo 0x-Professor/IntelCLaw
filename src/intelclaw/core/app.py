@@ -24,6 +24,7 @@ from intelclaw.tools.registry import ToolRegistry
 from intelclaw.security.manager import SecurityManager
 from intelclaw.integrations.copilot import CopilotIntegration, ModelManager
 from intelclaw.teams.mailbox import TeamMailbox
+from intelclaw.integrations.whatsapp.inbound import WhatsAppInboundService
 
 if TYPE_CHECKING:
     from intelclaw.ui.overlay import OverlayWindow
@@ -60,6 +61,7 @@ class IntelCLawApp:
         self.tray: Optional["SystemTray"] = None
         self.skills: Optional[SkillManager] = None
         self.mailbox: Optional[TeamMailbox] = None
+        self.whatsapp_inbound: Optional[WhatsAppInboundService] = None
         
         # Autonomous capabilities
         self.self_improvement: Optional[SelfImprovement] = None
@@ -137,6 +139,21 @@ class IntelCLawApp:
         )
         await self.agent.initialize()
         logger.info("Agent orchestrator initialized")
+
+        # 6a. Optional background WhatsApp inbound auto-replies (gated by config + allowlist).
+        try:
+            llm_provider = getattr(self.agent, "_llm_provider", None) if self.agent else None
+            self.whatsapp_inbound = WhatsAppInboundService(
+                config=self.config,
+                skills=self.skills,
+                tools=self.tools,
+                llm_provider=llm_provider,
+                mailbox=self.mailbox,
+                event_bus=self.event_bus,
+            )
+            logger.info("WhatsApp inbound service initialized")
+        except Exception as e:
+            logger.debug(f"WhatsApp inbound service init failed: {e}")
         
         # 6b. Initialize self-improvement module
         self.self_improvement = SelfImprovement(self.config)
@@ -173,6 +190,12 @@ class IntelCLawApp:
         
         if self.agent:
             await self.agent.shutdown()
+
+        if self.whatsapp_inbound:
+            try:
+                self.whatsapp_inbound.stop()
+            except Exception:
+                pass
         
         if self.tools:
             await self.tools.shutdown()
@@ -207,6 +230,8 @@ class IntelCLawApp:
             async_tasks.append(asyncio.create_task(self.perception.run()))
         if self.agent:
             async_tasks.append(asyncio.create_task(self.agent.run()))
+        if self.whatsapp_inbound:
+            async_tasks.append(asyncio.create_task(self.whatsapp_inbound.run()))
         async_tasks.append(asyncio.create_task(self._monitor_health()))
         
         try:

@@ -169,3 +169,14 @@ security:
   max_file_size_mb: 100
   allowed_directories: []  # All directories allowed
   audit_log_path: data/audit.log
+
+# WhatsApp (lharries/whatsapp-mcp)
+whatsapp:
+  bridge_messages_db_path: data/vendor/whatsapp-mcp/whatsapp-bridge/store/messages.db
+  inbound:
+    enabled: false
+    context_messages: 50
+    poll_seconds: 5
+    min_reply_interval_seconds: 15
+    allowlist_numbers: []
+    allowlist_jids: []

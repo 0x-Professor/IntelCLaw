@@ -19,4 +19,3 @@ data/
 # Test artifacts
 .coverage
 .pytest_cache/
-
