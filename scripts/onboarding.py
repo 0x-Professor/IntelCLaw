@@ -6,6 +6,8 @@ Interactive setup wizard for first-time configuration.
 
 import asyncio
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -24,7 +26,10 @@ try:
 except ImportError:
     RICH_AVAILABLE = False
     print("Installing rich for better UI...")
-    os.system("uv pip install rich")
+    if shutil.which("uv"):
+        os.system("uv pip install rich")
+    else:
+        os.system(f"\"{sys.executable}\" -m pip install rich")
     from rich.console import Console
     from rich.panel import Panel
     from rich.prompt import Prompt, Confirm
@@ -33,6 +38,7 @@ except ImportError:
     from rich.markdown import Markdown
 
 console = Console()
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def print_banner():
@@ -388,6 +394,10 @@ tools:
 # MCP Servers
 mcp:
   enabled: true
+  timeouts:
+    start_seconds: 30
+    list_tools_seconds: 30
+    call_tool_seconds: 300
   servers: []
 
 # Security (Only destructive protection)
@@ -484,9 +494,257 @@ def save_configuration(config_content: str, env_content: str, profile: dict):
     console.print(f"[green]✓ Saved {profile_path}[/green]")
     
     # Create data directories
-    for dir_name in ["data", "data/vector_db", "logs", "skills"]:
+    for dir_name in ["data", "data/vector_db", "data/vendor", "data/skills", "logs", "skills"]:
         Path(dir_name).mkdir(parents=True, exist_ok=True)
     console.print("[green]✓ Created data directories[/green]")
+
+
+def _prepend_path(path_dir: str) -> None:
+    if not path_dir:
+        return
+    try:
+        current = os.environ.get("PATH", "")
+        parts = [p for p in current.split(os.pathsep) if p]
+        if path_dir not in parts:
+            os.environ["PATH"] = path_dir + os.pathsep + current
+    except Exception:
+        pass
+
+
+def _run_cmd(cmd: list, *, cwd: Optional[Path] = None, env: Optional[dict] = None) -> int:
+    try:
+        pretty = " ".join(str(c) for c in cmd)
+        console.print(f"[dim]$ {pretty}[/dim]")
+        res = subprocess.run(
+            [str(c) for c in cmd],
+            cwd=str(cwd) if cwd else None,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode != 0:
+            tail_out = (res.stdout or "").strip()[-1500:]
+            tail_err = (res.stderr or "").strip()[-1500:]
+            if tail_out:
+                console.print(f"[yellow]{tail_out}[/yellow]")
+            if tail_err:
+                console.print(f"[yellow]{tail_err}[/yellow]")
+        return int(res.returncode)
+    except Exception as e:
+        console.print(f"[red]Command failed: {e}[/red]")
+        return 1
+
+
+def _ensure_pip_package(package: str) -> bool:
+    ok = _run_cmd([sys.executable, "-m", "pip", "install", "--upgrade", package]) == 0
+    if ok:
+        # Best-effort: ensure this Python's Scripts dir is on PATH for subsequent calls.
+        try:
+            _prepend_path(str(Path(sys.executable).resolve().parent))
+        except Exception:
+            pass
+    return ok
+
+
+def _ensure_git_available() -> bool:
+    if shutil.which("git"):
+        return True
+    console.print("[yellow]git not found on PATH.[/yellow]")
+    if shutil.which("winget") and Confirm.ask("Install Git for Windows via winget now?", default=True):
+        _run_cmd(
+            [
+                "winget",
+                "install",
+                "--id",
+                "Git.Git",
+                "-e",
+                "--source",
+                "winget",
+                "--accept-package-agreements",
+                "--accept-source-agreements",
+            ]
+        )
+    return bool(shutil.which("git"))
+
+
+def _ensure_go_available() -> bool:
+    if shutil.which("go"):
+        return True
+    candidates = [
+        Path(os.environ.get("ProgramFiles", r"C:\\Program Files")) / "Go" / "bin" / "go.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Go" / "bin" / "go.exe",
+    ]
+    for exe in candidates:
+        if exe.exists():
+            _prepend_path(str(exe.parent))
+            return True
+    console.print("[yellow]Go not found on PATH.[/yellow]")
+    if shutil.which("winget") and Confirm.ask("Install Go via winget now?", default=True):
+        _run_cmd(
+            [
+                "winget",
+                "install",
+                "--id",
+                "GoLang.Go",
+                "-e",
+                "--source",
+                "winget",
+                "--accept-package-agreements",
+                "--accept-source-agreements",
+            ]
+        )
+    return bool(shutil.which("go"))
+
+
+def _ensure_gcc_available() -> bool:
+    if shutil.which("gcc"):
+        return True
+    candidates = [
+        Path(r"C:\\msys64\\ucrt64\\bin\\gcc.exe"),
+        Path(r"C:\\msys64\\mingw64\\bin\\gcc.exe"),
+        Path(r"C:\\MinGW\\bin\\gcc.exe"),
+        Path(r"C:\\Dev-Cpp\\bin\\gcc.exe"),
+    ]
+    for exe in candidates:
+        if exe.exists():
+            _prepend_path(str(exe.parent))
+            return True
+
+    console.print("[yellow]gcc not found on PATH (needed for WhatsApp bridge via go-sqlite3).[/yellow]")
+    if not shutil.which("winget"):
+        return False
+    if not Confirm.ask("Install MSYS2 + GCC (ucrt64) via winget now?", default=False):
+        return False
+
+    _run_cmd(
+        [
+            "winget",
+            "install",
+            "--id",
+            "MSYS2.MSYS2",
+            "-e",
+            "--source",
+            "winget",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+        ]
+    )
+    bash = Path(r"C:\\msys64\\usr\\bin\\bash.exe")
+    if bash.exists():
+        _run_cmd([str(bash), "-lc", "pacman -Sy --noconfirm && pacman -S --noconfirm mingw-w64-ucrt-x86_64-gcc"])
+
+    for exe in candidates:
+        if exe.exists():
+            _prepend_path(str(exe.parent))
+            return True
+    return bool(shutil.which("gcc"))
+
+
+def _install_or_upgrade_windows_mcp() -> bool:
+    if shutil.which("windows-mcp"):
+        console.print("[green]âœ“ Windows-MCP already available[/green]")
+        return True
+    console.print("\n[bold]Installing Windows-MCP (windows-mcp)...[/bold]")
+    if not _ensure_pip_package("windows-mcp"):
+        console.print("[red]âœ— Failed to install windows-mcp[/red]")
+        return False
+    return _run_cmd(["windows-mcp", "--help"]) == 0
+
+
+def _ensure_uv_available() -> bool:
+    if shutil.which("uv"):
+        return True
+    console.print("[yellow]uv not found on PATH.[/yellow]")
+    if not _ensure_pip_package("uv"):
+        return False
+    return bool(shutil.which("uv"))
+
+
+def _install_or_update_whatsapp_mcp_repo() -> Optional[Path]:
+    if not _ensure_git_available():
+        console.print("[red]âœ— Git is required to install WhatsApp MCP[/red]")
+        return None
+
+    vendor_dir = REPO_ROOT / "data" / "vendor" / "whatsapp-mcp"
+    vendor_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    if (vendor_dir / ".git").exists():
+        console.print(f"[dim]Updating WhatsApp MCP repo: {vendor_dir}[/dim]")
+        _run_cmd(["git", "-C", str(vendor_dir), "pull", "--ff-only"])
+        return vendor_dir
+
+    if vendor_dir.exists():
+        console.print(f"[yellow]{vendor_dir} exists but is not a git repo; skipping clone.[/yellow]")
+        return vendor_dir
+
+    console.print(f"[dim]Cloning WhatsApp MCP repo: {vendor_dir}[/dim]")
+    if _run_cmd(["git", "clone", "https://github.com/lharries/whatsapp-mcp", str(vendor_dir)]) != 0:
+        console.print("[red]âœ— Failed to clone WhatsApp MCP repo[/red]")
+        return None
+    return vendor_dir
+
+
+def _warmup_whatsapp_server_deps(vendor_dir: Path) -> None:
+    server_dir = vendor_dir / "whatsapp-mcp-server"
+    if not server_dir.exists():
+        console.print(f"[yellow]WhatsApp MCP server directory not found: {server_dir}[/yellow]")
+        return
+    if not _ensure_uv_available():
+        console.print("[yellow]uv not available; skipping WhatsApp MCP dependency sync.[/yellow]")
+        return
+    console.print("[dim]Warming up WhatsApp MCP server dependencies (uv sync)...[/dim]")
+    _run_cmd(["uv", "--directory", str(server_dir), "sync"])
+
+
+def _launch_whatsapp_bridge_in_powershell() -> None:
+    ps1 = REPO_ROOT / "scripts" / "run_whatsapp_bridge.ps1"
+    if not ps1.exists():
+        console.print(f"[red]Missing script: {ps1}[/red]")
+        return
+
+    if not _ensure_go_available():
+        console.print("[red]âœ— Go is required to run the WhatsApp bridge[/red]")
+        return
+
+    _ensure_gcc_available()
+
+    console.print("[green]Launching WhatsApp bridge in a new PowerShell console (QR login)...[/green]")
+    creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    subprocess.Popen(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ps1),
+            "-RepoRoot",
+            str(REPO_ROOT),
+        ],
+        cwd=str(REPO_ROOT),
+        creationflags=creationflags,
+    )
+
+
+def setup_skills_and_mcp() -> None:
+    console.print("\n[bold cyan]Step 6: Skills & MCP Servers[/bold cyan]\n")
+    console.print(
+        "This step installs MCP-backed skills:\n"
+        "- Windows skill: windows-mcp (pip)\n"
+        "- WhatsApp skill: lharries/whatsapp-mcp (git + uv)\n"
+    )
+
+    if Confirm.ask("Install/upgrade Windows-MCP (windows-mcp) now?", default=True):
+        _install_or_upgrade_windows_mcp()
+
+    vendor_dir = None
+    if Confirm.ask("Install/upgrade WhatsApp MCP (lharries/whatsapp-mcp) now?", default=True):
+        vendor_dir = _install_or_update_whatsapp_mcp_repo()
+        if vendor_dir:
+            _warmup_whatsapp_server_deps(vendor_dir)
+
+    if vendor_dir and Confirm.ask("Launch WhatsApp bridge now in a new console (QR login)?", default=True):
+        _launch_whatsapp_bridge_in_powershell()
 
 
 def print_completion():
@@ -519,6 +777,7 @@ Destructive operations (delete, format, etc.) will always ask for confirmation.
 
 async def main():
     """Main onboarding flow."""
+    os.chdir(REPO_ROOT)
     print_banner()
     
     console.print("\n[bold]Welcome to IntelCLaw Setup Wizard![/bold]")
@@ -559,6 +818,13 @@ async def main():
         
         # Save files
         save_configuration(config_content, env_content, profile)
+
+        # Skills & MCP servers (optional)
+        try:
+            if Confirm.ask("\nSet up Skills & MCP servers now (Windows + WhatsApp)?", default=True):
+                setup_skills_and_mcp()
+        except Exception as e:
+            console.print(f"[yellow]âš  Skills setup skipped due to error: {e}[/yellow]")
         
         # Print completion
         print_completion()

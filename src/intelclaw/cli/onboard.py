@@ -576,11 +576,28 @@ def _install_whatsapp_mcp(*, launch_bridge: bool) -> bool:
         else:
             print("ðŸš€ Launching WhatsApp bridge in a new console (scan QR code there)...")
             creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-            subprocess.Popen(
-                ["cmd.exe", "/k", "go env -w CGO_ENABLED=1 && go run main.go"],
-                cwd=str(bridge_dir),
-                creationflags=creationflags,
-            )
+            ps1 = PROJECT_ROOT / "scripts" / "run_whatsapp_bridge.ps1"
+            if ps1.exists():
+                subprocess.Popen(
+                    [
+                        "powershell.exe",
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        str(ps1),
+                        "-RepoRoot",
+                        str(PROJECT_ROOT),
+                    ],
+                    cwd=str(PROJECT_ROOT),
+                    creationflags=creationflags,
+                )
+            else:
+                subprocess.Popen(
+                    ["cmd.exe", "/k", "go env -w CGO_ENABLED=1 && go run main.go"],
+                    cwd=str(bridge_dir),
+                    creationflags=creationflags,
+                )
 
     print("âœ… WhatsApp-MCP setup complete (repo present).")
     return True

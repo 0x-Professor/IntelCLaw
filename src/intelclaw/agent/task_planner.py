@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage
 from loguru import logger
@@ -332,6 +332,14 @@ IMPORTANT TOOL MAPPING:
 ### WMI/CIM
 - For CIM queries: use "windows_cim" with args {{"class_name": "Win32_OperatingSystem"}}
 
+### Windows MCP UI Automation (mcp_windows__*)
+- Use MCP tools when available (tool names starting with "mcp_").
+- IMPORTANT: For any MCP tool, only use keys that exist in that tool's schema (do not invent keys like "url" unless the schema includes it).
+- Launch/switch/resize an app window: use "mcp_windows__app" with args {{"mode": "launch|switch|resize", "name": "chrome"}}
+  - Do NOT pass "app" or "url" to "mcp_windows__app" (it doesn't accept those).
+- Open a URL in a browser: use "mcp_windows__shell" with args {{"command": "Start-Process chrome 'https://www.youtube.com'"}}
+- Run an arbitrary command: use "mcp_windows__shell" with args {{"command": "...", "timeout": 10}}
+
 ### Other
 - For taking screenshot: use "screenshot"
 - For clipboard: use "clipboard" with args {{"action": "read"}}
@@ -620,7 +628,17 @@ Return a JSON object:
             try:
                 tool_defs = self.tools.list_tools()
                 for td in tool_defs:
-                    tool_info.append(f"- {td.name}: {td.description[:150]}")
+                    desc = " ".join(str(td.description or "").split())
+                    line = f"- {td.name}: {desc[:150]}"
+                    if str(td.name or "").startswith("mcp_"):
+                        try:
+                            schema = json.dumps(td.parameters, ensure_ascii=False)
+                            if len(schema) > 500:
+                                schema = schema[:500] + "..."
+                            line += f" | schema: {schema}"
+                        except Exception:
+                            pass
+                    tool_info.append(line)
             except Exception as e:
                 logger.debug(f"Failed to get tools: {e}")
         
@@ -834,6 +852,71 @@ Return a JSON object:
             self._on_plan_completed(plan)
         
         return plan
+
+    def _rewrite_common_tool_invocations(
+        self, tool_name: str, tool_args: Dict[str, Any]
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Best-effort rewrite of common tool-call mistakes.
+
+        This is intentionally conservative and only handles a small set of
+        high-frequency issues (mainly around MCP tools) to prevent permanent
+        failures on otherwise valid plans.
+        """
+        name = str(tool_name or "").strip()
+        args: Dict[str, Any] = dict(tool_args or {})
+        if not name:
+            return name, args
+
+        # Windows MCP: App tool does not accept URL navigation.
+        if name == "mcp_windows__app":
+            # Common mistake: app -> name
+            if "app" in args and "name" not in args:
+                args["name"] = args.pop("app")
+
+            # Common mistake: trying to pass url/app to the App tool.
+            url = args.get("url")
+            if url:
+                url_str = str(url)
+                browser = str(args.get("name") or "chrome")
+
+                # Prefer MCP shell if available
+                try:
+                    if self.tools and hasattr(self.tools, "get_tool") and self.tools.get_tool("mcp_windows__shell"):
+                        return "mcp_windows__shell", {"command": f"Start-Process {browser} '{url_str}'"}
+                except Exception:
+                    pass
+
+                # Fall back to PowerShell tool
+                try:
+                    if self.tools and hasattr(self.tools, "get_tool") and self.tools.get_tool("powershell"):
+                        return "powershell", {"script": f"Start-Process {browser} '{url_str}'"}
+                except Exception:
+                    pass
+
+                # Last resort: launch_app can open URLs via default browser
+                try:
+                    if self.tools and hasattr(self.tools, "get_tool") and self.tools.get_tool("launch_app"):
+                        return "launch_app", {"target": url_str}
+                except Exception:
+                    pass
+
+                # Can't rewrite; strip the invalid key to avoid server-side validation errors.
+                args.pop("url", None)
+                return name, args
+
+        # Windows MCP: Shell tool expects `command`, but LLMs sometimes use `script`/`cmd`.
+        if name == "mcp_windows__shell":
+            if "command" not in args:
+                if "script" in args:
+                    args["command"] = args.pop("script")
+                elif "cmd" in args:
+                    args["command"] = args.pop("cmd")
+            if "timeout" not in args and "timeout_seconds" in args:
+                args["timeout"] = args.pop("timeout_seconds")
+            return name, args
+
+        return name, args
     
     async def _execute_step(
         self,
@@ -868,8 +951,19 @@ Return a JSON object:
                             synthesized_content = await self._synthesize_content_for_file(plan, step)
                             if synthesized_content:
                                 tool_args["content"] = synthesized_content
-                    
-                    return await self.tools.execute(step.tool, tool_args)
+
+                    tool_name = step.tool
+                    rewritten_name, rewritten_args = self._rewrite_common_tool_invocations(tool_name, tool_args)
+                    if rewritten_name != tool_name or rewritten_args != tool_args:
+                        logger.info(
+                            f"Rewriting tool call for step {step.id}: {tool_name} -> {rewritten_name}"
+                        )
+                        step.tool = rewritten_name
+                        step.tool_args = dict(rewritten_args or {})
+                        tool_name = rewritten_name
+                        tool_args = dict(rewritten_args or {})
+
+                    return await self.tools.execute(tool_name, tool_args)
 
                 # No specific tool - use LLM to reason and execute
                 logger.info(f"Using LLM to execute step: {step.title}")
@@ -999,6 +1093,12 @@ CURRENT STEP: {step.title}
 STEP DESCRIPTION: {step.description or step.title}
 {file_write_instruction}
 {"COMPLETED STEPS WITH RESULTS:" + chr(10) + chr(10).join(completed_context) if completed_context else "This is the first step."}
+
+IMPORTANT MCP NOTE:
+- For any tool starting with "mcp_", only use arguments allowed by that tool's schema. Do not invent keys.
+- Windows MCP quick reference:
+  - Launch/switch/resize app: TOOL: mcp_windows__app ARGS: {{"mode": "launch|switch|resize", "name": "chrome"}}
+  - Open URL / run command: TOOL: mcp_windows__shell ARGS: {{"command": "Start-Process chrome 'https://www.youtube.com'", "timeout": 10}}
 
 {"AVAILABLE TOOLS: " + ", ".join(available_tools) if available_tools else "No tools available - provide analysis/content directly."}
 
