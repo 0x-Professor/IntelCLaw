@@ -96,6 +96,23 @@ class WhatsAppInboundService:
             pass
         return None
 
+    @staticmethod
+    def _is_autoreply_eligible_chat_jid(chat_jid: str) -> bool:
+        """
+        Some WhatsApp chat JIDs are system/broadcast channels (e.g. status/newsletters)
+        that should never receive auto-replies.
+        """
+        jid = str(chat_jid or "").strip().lower()
+        if not jid:
+            return False
+        if jid == "status@broadcast":
+            return False
+        if jid.endswith("@newsletter"):
+            return False
+        if jid.endswith("@broadcast"):
+            return False
+        return True
+
     async def run(self) -> None:
         logger.info("WhatsAppInboundService started")
         poll_seconds = float(self.config.get("whatsapp.inbound.poll_seconds", 5.0) or 5.0)
@@ -164,10 +181,10 @@ class WhatsAppInboundService:
                         meta={"chat_jid": msg.chat_jid, "sender": sender_norm},
                     )
 
-                    # Only auto-reply when we have some persona/context for the sender.
-                    if not contact or not str(contact.persona or "").strip():
+                    if not self._is_autoreply_eligible_chat_jid(msg.chat_jid):
                         continue
 
+                    # Auto-reply to allowlisted senders (persona is optional).
                     await self._handle_inbound_message(msg, db_path, context_n=context_n, contact=contact)
                     self._last_reply_ts_by_chat[msg.chat_jid] = time.time()
 
@@ -284,7 +301,7 @@ class WhatsAppInboundService:
         db_path: Path,
         *,
         context_n: int,
-        contact: ContactEntry,
+        contact: Optional[ContactEntry],
     ) -> None:
         if not self.llm_provider or not getattr(self.llm_provider, "llm", None):
             return
@@ -303,6 +320,18 @@ class WhatsAppInboundService:
             convo_lines.append(f"[{r.get('timestamp','')}] {who}: {r.get('content','')}")
         convo_text = "\n".join(convo_lines)[-12000:]
 
+        contact_persona = (str(getattr(contact, "persona", "") or "").strip() if contact else "").strip()
+        contact_notes = (str(getattr(contact, "notes", "") or "").strip() if contact else "").strip()
+        if not contact_persona and not contact_notes:
+            contact_context = "No contact persona/notes are available. Reply politely and keep it short."
+        else:
+            parts = []
+            if contact_persona:
+                parts.append(f"Persona/relationship: {contact_persona}")
+            if contact_notes:
+                parts.append(f"Notes: {contact_notes}")
+            contact_context = "\n".join(parts)[:2000]
+
         system = (
             "You are an auto-reply assistant for WhatsApp.\n"
             "Rules:\n"
@@ -314,7 +343,7 @@ class WhatsAppInboundService:
         user = (
             f"Incoming message from {sender_name} (chat {msg.chat_jid}):\n"
             f"{msg.content}\n\n"
-            f"Contact persona/relationship context:\n{contact.persona}\n\n"
+            f"Contact context:\n{contact_context}\n\n"
             f"Conversation context (last {context_n} messages):\n"
             f"{convo_text}\n\n"
             "Draft the best reply text to send back."

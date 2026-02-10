@@ -175,7 +175,7 @@ whatsapp:
   bridge_messages_db_path: data/vendor/whatsapp-mcp/whatsapp-bridge/store/messages.db
   auto_start_bridge: true
   inbound:
-    enabled: false
+    enabled: true
     context_messages: 50
     poll_seconds: 5
     min_reply_interval_seconds: 15
