@@ -119,12 +119,27 @@ def _resolve_whatsapp_recipient_via_contacts(value: Any) -> Any:
         from intelclaw.contacts.store import ContactsStore
 
         store = ContactsStore(Path("data") / "contacts.md")
-        matches = store.lookup(raw)
-        if not matches:
-            return raw
-        exact = [m for m in matches if (m.name or "").strip().lower() == raw.lower()]
-        m = exact[0] if exact else matches[0]
-        return m.whatsapp_jid or m.phone or raw
+        candidates = [raw]
+        cleaned = raw
+        cleaned = re.sub(r"(?i)\b(on|via)\s+whatsapp\b", "", cleaned).strip()
+        cleaned = re.sub(r"(?i)\bwhatsapp\b", "", cleaned).strip()
+        cleaned = re.sub(r"(?i)^(send|text|message)\s+(a\s+)?(whatsapp\s+)?(message\s+)?to\s+", "", cleaned).strip()
+        cleaned = re.sub(r"(?i)^to\s+", "", cleaned).strip()
+        cleaned = cleaned.strip(" \"'")
+        if cleaned and cleaned.lower() != raw.lower():
+            candidates.append(cleaned)
+
+        for q in candidates:
+            matches = store.lookup(q)
+            if not matches:
+                continue
+            exact = [m for m in matches if (m.name or "").strip().lower() == q.lower()]
+            m = exact[0] if exact else matches[0]
+            resolved = m.whatsapp_jid or m.phone
+            if resolved:
+                return resolved
+
+        return raw
     except Exception:
         return raw
 

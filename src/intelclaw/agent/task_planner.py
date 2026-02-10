@@ -1004,11 +1004,26 @@ Return a JSON object:
                             from intelclaw.contacts.store import ContactsStore
 
                             store = ContactsStore(Path("data") / "contacts.md")
-                            matches = store.lookup(rec_s)
-                            if matches:
-                                exact = [m for m in matches if (m.name or "").strip().lower() == rec_s.lower()]
+                            candidates: List[str] = [rec_s]
+                            cleaned = rec_s
+                            cleaned = re.sub(r"(?i)\\b(on|via)\\s+whatsapp\\b", "", cleaned).strip()
+                            cleaned = re.sub(r"(?i)\\bwhatsapp\\b", "", cleaned).strip()
+                            cleaned = re.sub(r"(?i)^(send|text|message)\\s+(a\\s+)?(whatsapp\\s+)?(message\\s+)?to\\s+", "", cleaned).strip()
+                            cleaned = re.sub(r"(?i)^to\\s+", "", cleaned).strip()
+                            cleaned = cleaned.strip(" \\\"'")
+                            if cleaned and cleaned.lower() != rec_s.lower():
+                                candidates.append(cleaned)
+
+                            for q in candidates:
+                                matches = store.lookup(q)
+                                if not matches:
+                                    continue
+                                exact = [m for m in matches if (m.name or "").strip().lower() == q.lower()]
                                 m = exact[0] if exact else matches[0]
-                                args["recipient"] = m.whatsapp_jid or m.phone
+                                resolved = m.whatsapp_jid or m.phone
+                                if resolved:
+                                    args["recipient"] = resolved
+                                    break
                         except Exception:
                             pass
             return name, args
@@ -1070,6 +1085,86 @@ Return a JSON object:
             return matches[0]
 
         # Ambiguous; do not guess.
+        return None
+
+    def _infer_contact_from_plan(self, plan: TaskPlan, step: TaskStep) -> Optional[Dict[str, str]]:
+        """
+        Best-effort infer a contact (name/phone/jid) from earlier steps.
+
+        Supports:
+        - contacts_lookup JSON results
+        - newline-delimited JSON objects (common for MCP stdout-like tool outputs)
+        """
+
+        def _as_rows(value: Any) -> List[Dict[str, Any]]:
+            parsed = self._try_parse_json(value)
+            if isinstance(parsed, dict):
+                return [parsed]
+            if isinstance(parsed, list):
+                return [r for r in parsed if isinstance(r, dict)]
+            if isinstance(value, str):
+                rows: List[Dict[str, Any]] = []
+                for ln in value.splitlines():
+                    s = ln.strip()
+                    if not (s.startswith("{") and s.endswith("}")):
+                        continue
+                    try:
+                        obj = json.loads(s)
+                    except Exception:
+                        continue
+                    if isinstance(obj, dict):
+                        rows.append(obj)
+                return rows
+            return []
+
+        haystack = f"{step.title}\n{step.description}\n{plan.goal}".lower()
+        target_name = ""
+        try:
+            if isinstance(step.tool_args, dict):
+                target_name = str(step.tool_args.get("name") or step.tool_args.get("query") or "").strip()
+        except Exception:
+            target_name = ""
+
+        lookup_candidates: List[Dict[str, str]] = []
+        other_candidates: List[Dict[str, str]] = []
+        for s in reversed(plan.completed_steps):
+            if not s.result:
+                continue
+            if s.tool not in {"contacts_lookup", "mcp_whatsapp__search_contacts"} and not str(s.result).lstrip().startswith("{"):
+                # Avoid parsing arbitrary text unless it looks JSON-like.
+                continue
+            for row in _as_rows(s.result):
+                name = str(row.get("name") or "").strip()
+                phone = str(row.get("phone") or row.get("phone_number") or "").strip()
+                jid = str(row.get("whatsapp_jid") or row.get("jid") or "").strip()
+
+                phone_digits = re.sub(r"\\D+", "", phone)
+                phone = phone_digits or phone
+
+                if not (name or phone or jid):
+                    continue
+
+                entry = {"name": name, "phone": phone, "whatsapp_jid": jid}
+                if s.tool == "contacts_lookup":
+                    lookup_candidates.append(entry)
+                else:
+                    other_candidates.append(entry)
+
+        candidates = lookup_candidates or other_candidates
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+
+        if target_name:
+            exact = [c for c in candidates if c.get("name", "").strip().lower() == target_name.lower()]
+            if len(exact) == 1:
+                return exact[0]
+
+        matches = [c for c in candidates if c.get("name") and c["name"].lower() in haystack]
+        if len(matches) == 1:
+            return matches[0]
+
         return None
 
     def _infer_whatsapp_message_from_plan(self, plan: TaskPlan) -> Optional[str]:
@@ -1233,6 +1328,15 @@ Return a JSON object:
 
                     # Backfill missing WhatsApp send args from previous steps (common LLM omission).
                     if tool_name in {"mcp_whatsapp__send_message", "mcp_whatsapp__send_file", "mcp_whatsapp__send_audio_message"}:
+                        rec = tool_args.get("recipient")
+                        if isinstance(rec, str):
+                            rec_s = rec.strip()
+                            if rec_s and "@" not in rec_s and not rec_s.isdigit():
+                                inferred = self._infer_whatsapp_recipient_from_plan(plan, step)
+                                if inferred:
+                                    tool_args["recipient"] = inferred
+                                    step.tool_args = dict(tool_args)
+
                         if not tool_args.get("recipient"):
                             inferred = self._infer_whatsapp_recipient_from_plan(plan, step)
                             if inferred:
@@ -1245,6 +1349,27 @@ Return a JSON object:
                             if inferred_msg:
                                 tool_args["message"] = inferred_msg
                                 step.tool_args = dict(tool_args)
+
+                    # Backfill contacts_upsert required args from earlier contact resolution steps.
+                    if tool_name == "contacts_upsert":
+                        if not tool_args.get("phone"):
+                            # Derive phone from a provided JID if present.
+                            jid_val = tool_args.get("whatsapp_jid") or tool_args.get("jid")
+                            if isinstance(jid_val, str) and "@" in jid_val:
+                                phone_part = jid_val.split("@", 1)[0].strip()
+                                if phone_part.isdigit():
+                                    tool_args["phone"] = phone_part
+
+                        if not tool_args.get("phone") or not tool_args.get("name"):
+                            inferred_contact = self._infer_contact_from_plan(plan, step)
+                            if inferred_contact:
+                                if not tool_args.get("name") and inferred_contact.get("name"):
+                                    tool_args["name"] = inferred_contact["name"]
+                                if not tool_args.get("phone") and inferred_contact.get("phone"):
+                                    tool_args["phone"] = inferred_contact["phone"]
+                                if not tool_args.get("whatsapp_jid") and inferred_contact.get("whatsapp_jid"):
+                                    tool_args["whatsapp_jid"] = inferred_contact["whatsapp_jid"]
+                        step.tool_args = dict(tool_args)
 
                     return await self.tools.execute(tool_name, tool_args)
 

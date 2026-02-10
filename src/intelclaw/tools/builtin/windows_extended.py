@@ -47,6 +47,8 @@ async def _run_powershell(script: str, timeout: int = 60) -> ToolResult:
 
         success = process.returncode == 0
         error_msg = stderr_str.strip() if not success else None
+        if not success and not error_msg:
+            error_msg = f"PowerShell failed with return code {process.returncode}"
         return ToolResult(
             success=success,
             data={
@@ -167,7 +169,7 @@ class ProcessManagementTool(BaseTool):
                 f"Select-Object -First {int(limit)} Id, ProcessName, "
                 "@{Name='CPU_Seconds';Expression={[math]::Round($_.CPU,2)}}, "
                 "@{Name='Memory_MB';Expression={[math]::Round($_.WorkingSet64/1MB,1)}}, "
-                "MainWindowTitle, StartTime, Path | ConvertTo-Json -Depth 3"
+                "MainWindowTitle | ConvertTo-Json -Depth 3"
             )
         elif action == "find":
             if not name:
@@ -177,24 +179,33 @@ class ProcessManagementTool(BaseTool):
                 f"Select-Object -First {int(limit)} Id, ProcessName, "
                 "@{Name='CPU_Seconds';Expression={[math]::Round($_.CPU,2)}}, "
                 "@{Name='Memory_MB';Expression={[math]::Round($_.WorkingSet64/1MB,1)}}, "
-                "MainWindowTitle, StartTime, Path | ConvertTo-Json -Depth 3"
+                "MainWindowTitle | ConvertTo-Json -Depth 3"
             )
         elif action == "details":
             if pid:
-                ps.append(f"$proc = Get-Process -Id {int(pid)}")
+                ps.append(f"$proc = Get-Process -Id {int(pid)} -ErrorAction Stop")
             elif name:
-                ps.append(f"$proc = Get-Process -Name '{name}' | Select-Object -First 1")
+                ps.append(f"$proc = Get-Process -Name '{name}' -ErrorAction Stop | Select-Object -First 1")
             else:
                 return ToolResult(success=False, error="'pid' or 'name' is required for details")
+
+            ps.append("$start = $null; try { $start = $proc.StartTime } catch {}")
+            ps.append("$exe = $null; $cmd = $null; try { $cim = Get-CimInstance Win32_Process -Filter \"ProcessId = $($proc.Id)\" -ErrorAction SilentlyContinue; if ($cim) { $exe = $cim.ExecutablePath; $cmd = $cim.CommandLine } } catch {}")
             ps.append(
-                "$proc | Select-Object Id, ProcessName, "
-                "@{Name='CPU_Seconds';Expression={[math]::Round($_.CPU,2)}}, "
-                "@{Name='Memory_MB';Expression={[math]::Round($_.WorkingSet64/1MB,1)}}, "
-                "@{Name='VirtualMemory_MB';Expression={[math]::Round($_.VirtualMemorySize64/1MB,1)}}, "
-                "MainWindowTitle, StartTime, Path, "
-                "@{Name='ThreadCount';Expression={$_.Threads.Count}}, "
-                "@{Name='HandleCount';Expression={$_.HandleCount}}, "
-                "@{Name='Responding';Expression={$_.Responding}} | ConvertTo-Json -Depth 3"
+                "[PSCustomObject]@{"
+                "Id=$proc.Id;"
+                "ProcessName=$proc.ProcessName;"
+                "CPU_Seconds=[math]::Round($proc.CPU,2);"
+                "Memory_MB=[math]::Round($proc.WorkingSet64/1MB,1);"
+                "VirtualMemory_MB=[math]::Round($proc.VirtualMemorySize64/1MB,1);"
+                "MainWindowTitle=$proc.MainWindowTitle;"
+                "StartTime=$start;"
+                "ExecutablePath=$exe;"
+                "CommandLine=$cmd;"
+                "ThreadCount=$proc.Threads.Count;"
+                "HandleCount=$proc.HandleCount;"
+                "Responding=$proc.Responding"
+                "} | ConvertTo-Json -Depth 4"
             )
         elif action == "kill":
             if not pid and not name:
