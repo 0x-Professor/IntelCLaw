@@ -1086,6 +1086,105 @@ Return a JSON object:
             if msg:
                 return msg
         return None
+
+    def _infer_whatsapp_message_from_goal(self, plan: TaskPlan, step: TaskStep) -> Optional[str]:
+        """
+        Best-effort infer a WhatsApp message body directly from the plan goal.
+
+        This is a fallback for common 2-step plans:
+          1) contacts_lookup
+          2) mcp_whatsapp__send_message (LLM sometimes omits required `message`)
+        """
+        goal = str(getattr(plan, "goal", "") or "").strip()
+        if not goal:
+            return None
+
+        # If the user provided an explicit quoted message, prefer sending it verbatim.
+        quoted = re.search(r'["“](.{1,1000}?)["”]', goal)
+        if quoted:
+            body = quoted.group(1).strip()
+        else:
+            body = ""
+
+            # Extract the part after "ask him/her/them ..."
+            m = re.search(r"\bask\s+(him|her|them)\b\s*(.+)$", goal, flags=re.IGNORECASE)
+            if m:
+                body = m.group(2).strip()
+            else:
+                # Or "tell him/her/them ..."
+                m2 = re.search(r"\btell\s+(him|her|them)\b\s*(.+)$", goal, flags=re.IGNORECASE)
+                if m2:
+                    body = m2.group(2).strip()
+
+        body = body.strip()
+        if not body:
+            return None
+
+        # Normalize common third-person phrasing into a direct second-person question.
+        body = re.sub(
+            r"^when\s+(he|she|they)\s+will\s+",
+            "when will you ",
+            body,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        # Ensure punctuation.
+        if body and body[-1] not in ".?!":
+            if re.match(
+                r"(?i)^(when|what|how|why|where|who|can|will|do|did|are|is|does|should|could|would)\b",
+                body,
+            ):
+                body += "?"
+            else:
+                body += "."
+
+        # If it already looks like a full message, do not add a greeting.
+        if re.match(r"(?i)^(hi|hello|hey)\b", body):
+            return body
+
+        first_name: Optional[str] = None
+
+        # Try to pull a name from the most recent contacts_lookup step.
+        try:
+            candidates: List[str] = []
+            for s in reversed(plan.completed_steps):
+                if s.tool != "contacts_lookup" or not s.result:
+                    continue
+                parsed = self._try_parse_json(s.result)
+                if not parsed:
+                    continue
+                rows = parsed if isinstance(parsed, list) else [parsed]
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    name = str(row.get("name") or "").strip()
+                    if name:
+                        candidates.append(name)
+
+            if candidates:
+                haystack = f"{step.title}\n{step.description}\n{goal}".lower()
+                uniq: List[str] = []
+                for n in candidates:
+                    if n not in uniq:
+                        uniq.append(n)
+
+                chosen = None
+                if len(uniq) == 1:
+                    chosen = uniq[0]
+                else:
+                    matches = [n for n in uniq if n.lower() in haystack]
+                    if len(matches) == 1:
+                        chosen = matches[0]
+
+                if chosen:
+                    first_name = str(chosen).split()[0].strip() or None
+        except Exception:
+            first_name = None
+
+        if first_name:
+            return f"Hi {first_name}, {body}"
+
+        return body
     
     async def _execute_step(
         self,
@@ -1141,6 +1240,8 @@ Return a JSON object:
                                 step.tool_args = dict(tool_args)
                         if tool_name == "mcp_whatsapp__send_message" and not tool_args.get("message"):
                             inferred_msg = self._infer_whatsapp_message_from_plan(plan)
+                            if not inferred_msg:
+                                inferred_msg = self._infer_whatsapp_message_from_goal(plan, step)
                             if inferred_msg:
                                 tool_args["message"] = inferred_msg
                                 step.tool_args = dict(tool_args)

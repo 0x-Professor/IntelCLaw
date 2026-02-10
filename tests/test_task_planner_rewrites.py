@@ -74,17 +74,17 @@ async def test_backfill_whatsapp_recipient_from_contacts_lookup_result():
 
     step_1 = TaskStep(
         id="step_1",
-        title="Resolve Talha contact information",
+        title="Resolve contact information",
         tool="contacts_lookup",
-        tool_args={"query": "Talha Bilal AU CYS"},
+        tool_args={"query": "Alex Example"},
         status=TaskStatus.COMPLETED,
     )
     step_1.result = json.dumps(
         [
             {
-                "name": "Talha Bilal AU CYS",
-                "phone": "923171156353",
-                "whatsapp_jid": "923171156353@s.whatsapp.net",
+                "name": "Alex Example",
+                "phone": "15551234567",
+                "whatsapp_jid": "15551234567@s.whatsapp.net",
             }
         ]
     )
@@ -96,11 +96,11 @@ async def test_backfill_whatsapp_recipient_from_contacts_lookup_result():
         tool_args=None,
         status=TaskStatus.COMPLETED,
     )
-    step_2.result = "Hello Talha Bilal,\n\nThis is a test.\n"
+    step_2.result = "Hello Alex,\n\nThis is a test.\n"
 
     step_3 = TaskStep(
         id="step_3",
-        title="Send WhatsApp message to Talha Bilal AU CYS",
+        title="Send WhatsApp message to Alex Example",
         tool="mcp_whatsapp__send_message",
         tool_args={"message": "hi"},
         dependencies=["step_1", "step_2"],
@@ -120,4 +120,56 @@ async def test_backfill_whatsapp_recipient_from_contacts_lookup_result():
     assert spy.calls, "Expected the send_message tool to be executed"
     tool_name, tool_args = spy.calls[0]
     assert tool_name == "mcp_whatsapp__send_message"
-    assert tool_args["recipient"] == "923171156353@s.whatsapp.net"
+    assert tool_args["recipient"] == "15551234567@s.whatsapp.net"
+
+
+@pytest.mark.asyncio
+async def test_backfill_whatsapp_message_from_goal_when_missing():
+    import json
+
+    spy = _SpyTools()
+    planner = TaskPlanner(tools=spy)
+
+    step_1 = TaskStep(
+        id="step_1",
+        title="Resolve contact information",
+        tool="contacts_lookup",
+        tool_args={"query": "Alex Example"},
+        status=TaskStatus.COMPLETED,
+    )
+    step_1.result = json.dumps(
+        [
+            {
+                "name": "Alex Example",
+                "phone": "15551234567",
+                "whatsapp_jid": "15551234567@s.whatsapp.net",
+            }
+        ]
+    )
+
+    step_2 = TaskStep(
+        id="step_2",
+        title="Send WhatsApp message to Alex Example",
+        tool="mcp_whatsapp__send_message",
+        tool_args={},  # LLM omitted required `message`
+        dependencies=["step_1"],
+        status=TaskStatus.PENDING,
+    )
+
+    plan = TaskPlan(
+        id="plan_1",
+        goal="Please send a WhatsApp message to Alex and ask him when he will return from the job?",
+        steps=[step_1, step_2],
+        context={},
+        metadata={},
+    )
+
+    await planner._execute_step(step_2, plan, executor=None)
+
+    assert spy.calls, "Expected the send_message tool to be executed"
+    tool_name, tool_args = spy.calls[0]
+    assert tool_name == "mcp_whatsapp__send_message"
+    assert tool_args["recipient"] == "15551234567@s.whatsapp.net"
+    msg = str(tool_args.get("message") or "")
+    assert msg, "Expected message to be backfilled"
+    assert "when will you return" in msg.lower()
