@@ -32,7 +32,7 @@ class ContactsStore:
 
     Canonical format:
 
-    | name | phone | whatsapp_jid | inbound_allowed | notes |
+    | name | phone | gender | whatsapp_jid | inbound_allowed | persona | notes |
     """
 
     def __init__(self, path: Path) -> None:
@@ -58,7 +58,7 @@ class ContactsStore:
         for e in self.load():
             if inbound_only and not e.inbound_allowed:
                 continue
-            hay = " ".join([e.name, e.phone, e.whatsapp_jid or "", e.notes]).lower()
+            hay = " ".join([e.name, e.phone, e.gender, e.whatsapp_jid or "", e.persona, e.notes]).lower()
             if q in hay:
                 out.append(e)
         return out
@@ -68,8 +68,10 @@ class ContactsStore:
         *,
         name: str,
         phone: str,
+        gender: Optional[str] = None,
         whatsapp_jid: Optional[str] = None,
         inbound_allowed: Optional[bool] = None,
+        persona: Optional[str] = None,
         notes: Optional[str] = None,
     ) -> ContactEntry:
         n = str(name or "").strip()
@@ -78,6 +80,7 @@ class ContactsStore:
         phone_norm = normalize_phone(phone)
         if not phone_norm:
             raise ValueError("phone is required")
+        gender_norm = str(gender or "").strip()
 
         existing = self.load()
         updated: List[ContactEntry] = []
@@ -92,13 +95,17 @@ class ContactsStore:
             entry = ContactEntry(
                 name=n,
                 phone=phone_norm,
+                gender=gender_norm,
                 whatsapp_jid=whatsapp_jid.strip() if isinstance(whatsapp_jid, str) and whatsapp_jid.strip() else None,
                 inbound_allowed=bool(inbound_allowed) if inbound_allowed is not None else False,
+                persona=str(persona or "").strip(),
                 notes=str(notes or "").strip(),
             )
         else:
             entry = found
             entry = replace(entry, name=n, phone=phone_norm)
+            if gender is not None:
+                entry = replace(entry, gender=gender_norm)
             if whatsapp_jid is not None:
                 entry = replace(
                     entry,
@@ -106,6 +113,8 @@ class ContactsStore:
                 )
             if inbound_allowed is not None:
                 entry = replace(entry, inbound_allowed=bool(inbound_allowed))
+            if persona is not None:
+                entry = replace(entry, persona=str(persona or "").strip())
             if notes is not None:
                 entry = replace(entry, notes=str(notes or "").strip())
 
@@ -151,15 +160,19 @@ class ContactsStore:
             phone = _get(cells, "phone")
             if not name or not phone:
                 continue
+            gender = _get(cells, "gender")
             jid = _get(cells, "whatsapp_jid") or None
             inbound = _parse_bool(_get(cells, "inbound_allowed"))
+            persona = _get(cells, "persona")
             notes = _get(cells, "notes")
             out.append(
                 ContactEntry(
                     name=name,
                     phone=normalize_phone(phone),
+                    gender=str(gender or "").strip(),
                     whatsapp_jid=jid.strip() if isinstance(jid, str) and jid.strip() else None,
                     inbound_allowed=inbound,
+                    persona=str(persona or "").strip(),
                     notes=str(notes or "").strip(),
                 )
             )
@@ -167,17 +180,25 @@ class ContactsStore:
 
     @staticmethod
     def _render_markdown(entries: List[ContactEntry]) -> str:
+        def _cell(v: str) -> str:
+            s = str(v or "").replace("\n", " ").replace("\r", " ").strip()
+            # Avoid breaking markdown tables.
+            return s.replace("|", "\\|")
+
         header = [
             "# Contacts",
             "",
-            "| name | phone | whatsapp_jid | inbound_allowed | notes |",
-            "| --- | --- | --- | --- | --- |",
+            "| name | phone | gender | whatsapp_jid | inbound_allowed | persona | notes |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
         ]
         rows: List[str] = []
         for e in entries:
             inbound = "yes" if e.inbound_allowed else "no"
             jid = e.whatsapp_jid or ""
-            notes = (e.notes or "").replace("\n", " ").strip()
-            rows.append(f"| {e.name} | {e.phone} | {jid} | {inbound} | {notes} |")
+            gender = e.gender or ""
+            persona = e.persona or ""
+            notes = e.notes or ""
+            rows.append(
+                f"| {_cell(e.name)} | {_cell(e.phone)} | {_cell(gender)} | {_cell(jid)} | {_cell(inbound)} | {_cell(persona)} | {_cell(notes)} |"
+            )
         return "\n".join(header + rows + [""])
-

@@ -547,7 +547,20 @@ def _run_cmd(cmd: list, *, cwd: Optional[Path] = None, env: Optional[dict] = Non
 
 
 def _ensure_pip_package(package: str) -> bool:
-    ok = _run_cmd([sys.executable, "-m", "pip", "install", "--upgrade", package]) == 0
+    # uv-managed venvs may not ship with pip. Bootstrap it via ensurepip if needed.
+    if _run_cmd([sys.executable, "-m", "pip", "--version"]) != 0:
+        console.print("[yellow]pip not available; bootstrapping with ensurepip...[/yellow]")
+        if _run_cmd([sys.executable, "-m", "ensurepip", "--upgrade"]) != 0:
+            # Fallback: install via uv pip (does not require pip to be present).
+            if shutil.which("uv"):
+                console.print("[yellow]Falling back to `uv pip install`...[/yellow]")
+                ok = _run_cmd(["uv", "pip", "install", "--upgrade", "-p", sys.executable, package]) == 0
+            else:
+                ok = False
+        else:
+            ok = _run_cmd([sys.executable, "-m", "pip", "install", "--upgrade", package]) == 0
+    else:
+        ok = _run_cmd([sys.executable, "-m", "pip", "install", "--upgrade", package]) == 0
     if ok:
         # Best-effort: ensure this Python's Scripts dir is on PATH for subsequent calls.
         try:
@@ -712,7 +725,9 @@ def _warmup_whatsapp_server_deps(vendor_dir: Path) -> None:
         console.print("[yellow]uv not available; skipping WhatsApp MCP dependency sync.[/yellow]")
         return
     console.print("[dim]Warming up WhatsApp MCP server dependencies (uv sync)...[/dim]")
-    _run_cmd(["uv", "--directory", str(server_dir), "sync"])
+    env = dict(os.environ)
+    env.pop("VIRTUAL_ENV", None)
+    _run_cmd(["uv", "--directory", str(server_dir), "sync"], env=env)
 
 
 def _launch_whatsapp_bridge_in_powershell() -> None:

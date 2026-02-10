@@ -15,6 +15,10 @@ logs/
 
 # Data
 data/
+data/contacts.md
+
+# Personal data (optional)
+persona/CONTACTS.md
 
 # Test artifacts
 .coverage

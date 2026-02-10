@@ -45,8 +45,12 @@ async def test_mcp_payload_success_false_becomes_tool_failure(monkeypatch):
     res = await tool.execute(recipient="+92 317-115-6353", message="hi")
     assert res.success is False
     assert "boom" in (res.error or "")
-    # Recipient normalized (digits only)
-    assert fake.calls[0]["args"]["recipient"] == "923171156353"
+    # Recipient normalized (digits-only phone or a resolved JID).
+    sent_recipient = fake.calls[0]["args"]["recipient"]
+    if "@" in sent_recipient:
+        assert sent_recipient.split("@", 1)[0] == "923171156353"
+    else:
+        assert sent_recipient == "923171156353"
 
 
 @pytest.mark.asyncio
@@ -78,4 +82,3 @@ async def test_mcp_whatsapp_iq_timeout_retries(monkeypatch):
     res = await tool.execute(recipient="923171156353", message="hi")
     assert res.success is True
     assert fake.calls and len(fake.calls) == 2
-

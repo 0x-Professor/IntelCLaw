@@ -490,14 +490,66 @@ async def run_onboard(
     return True
 
 
-def _run_cmd(cmd: list[str], *, cwd: Optional[Path] = None) -> int:
+def _run_cmd(cmd: list[str], *, cwd: Optional[Path] = None, env: Optional[Dict[str, str]] = None) -> int:
     try:
-        res = subprocess.run(cmd, cwd=str(cwd) if cwd else None)
+        res = subprocess.run(cmd, cwd=str(cwd) if cwd else None, env=env)
         return int(res.returncode)
     except FileNotFoundError:
         return 127
     except Exception:
         return 1
+
+
+def _prepend_path(path_dir: str) -> None:
+    if not path_dir:
+        return
+    try:
+        current = os.environ.get("PATH", "")
+        parts = [p for p in current.split(os.pathsep) if p]
+        if path_dir not in parts:
+            os.environ["PATH"] = path_dir + os.pathsep + current
+    except Exception:
+        return
+
+
+def _ensure_python_scripts_on_path() -> None:
+    try:
+        py_exe = Path(sys.executable).resolve()
+        py_dir = py_exe.parent
+        # In venvs, python.exe typically lives in <venv>/Scripts.
+        scripts_dir = py_dir if py_dir.name.lower() == "scripts" else (py_dir / "Scripts")
+        if scripts_dir.exists():
+            _prepend_path(str(scripts_dir))
+        if py_dir.exists():
+            _prepend_path(str(py_dir))
+    except Exception:
+        return
+
+
+def _ensure_pip_available() -> bool:
+    _ensure_python_scripts_on_path()
+    if _run_cmd([sys.executable, "-m", "pip", "--version"]) == 0:
+        return True
+    print("WARNING: pip not available in this environment; bootstrapping with ensurepip...")
+    if _run_cmd([sys.executable, "-m", "ensurepip", "--upgrade"]) != 0:
+        return False
+    return _run_cmd([sys.executable, "-m", "pip", "--version"]) == 0
+
+
+def _pip_install(package: str) -> bool:
+    """
+    Install a package into the current interpreter environment.
+
+    Supports uv-managed venvs that may not include pip by default.
+    """
+    _ensure_python_scripts_on_path()
+    if _ensure_pip_available():
+        if _run_cmd([sys.executable, "-m", "pip", "install", "--upgrade", package]) == 0:
+            return True
+    # Fallback: uv pip does not require pip to be present.
+    if shutil.which("uv"):
+        return _run_cmd(["uv", "pip", "install", "--upgrade", "-p", sys.executable, package]) == 0
+    return False
 
 
 def _print_missing_exe(name: str, *, hint: Optional[str] = None) -> None:
@@ -509,10 +561,11 @@ def _print_missing_exe(name: str, *, hint: Optional[str] = None) -> None:
 
 def _install_windows_mcp() -> bool:
     print("\nðŸªŸ Installing Windows-MCP (windows-mcp)...")
-    rc = _run_cmd([sys.executable, "-m", "pip", "install", "--upgrade", "windows-mcp"])
+    rc = 0 if _pip_install("windows-mcp") else 1
     if rc != 0:
         print("âš ï¸  Failed to install windows-mcp via pip.")
         return False
+    _ensure_python_scripts_on_path()
     rc2 = _run_cmd(["windows-mcp", "--help"])
     if rc2 != 0:
         print("âš ï¸  windows-mcp installed but could not be executed from PATH.")
@@ -525,8 +578,39 @@ def _ensure_uv_available() -> bool:
     if shutil.which("uv"):
         return True
     print("\nðŸ”§ Installing uv...")
-    rc = _run_cmd([sys.executable, "-m", "pip", "install", "--upgrade", "uv"])
+    rc = 0 if _pip_install("uv") else 1
+    _ensure_python_scripts_on_path()
     return rc == 0 and bool(shutil.which("uv"))
+
+
+def _ensure_go_available() -> bool:
+    if shutil.which("go"):
+        return True
+    candidates = [
+        Path(os.environ.get("ProgramFiles", r"C:\\Program Files")) / "Go" / "bin" / "go.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Go" / "bin" / "go.exe",
+    ]
+    for exe in candidates:
+        if exe.exists():
+            _prepend_path(str(exe.parent))
+            return True
+    return bool(shutil.which("go"))
+
+
+def _ensure_gcc_available() -> bool:
+    if shutil.which("gcc"):
+        return True
+    candidates = [
+        Path(r"C:\\msys64\\ucrt64\\bin\\gcc.exe"),
+        Path(r"C:\\msys64\\mingw64\\bin\\gcc.exe"),
+        Path(r"C:\\MinGW\\bin\\gcc.exe"),
+        Path(r"C:\\Dev-Cpp\\bin\\gcc.exe"),
+    ]
+    for exe in candidates:
+        if exe.exists():
+            _prepend_path(str(exe.parent))
+            return True
+    return bool(shutil.which("gcc"))
 
 
 def _install_whatsapp_mcp(*, launch_bridge: bool) -> bool:
@@ -555,7 +639,9 @@ def _install_whatsapp_mcp(*, launch_bridge: bool) -> bool:
     server_dir = vendor_dir / "whatsapp-mcp-server"
     if server_dir.exists():
         print("ðŸ§ª Warming up Python dependencies (uv sync)...")
-        _run_cmd(["uv", "--directory", str(server_dir), "sync"])
+        env = dict(os.environ)
+        env.pop("VIRTUAL_ENV", None)
+        _run_cmd(["uv", "--directory", str(server_dir), "sync"], env=env)
     else:
         print("âš ï¸  Expected server directory not found:", server_dir)
 
@@ -563,7 +649,7 @@ def _install_whatsapp_mcp(*, launch_bridge: bool) -> bool:
         bridge_dir = vendor_dir / "whatsapp-bridge"
         if not bridge_dir.exists():
             print("âš ï¸  Expected bridge directory not found:", bridge_dir)
-        elif not shutil.which("go"):
+        elif not _ensure_go_available():
             _print_missing_exe(
                 "go",
                 hint=(
@@ -578,6 +664,8 @@ def _install_whatsapp_mcp(*, launch_bridge: bool) -> bool:
             )
         else:
             print("ðŸš€ Launching WhatsApp bridge in a new console (scan QR code there)...")
+            if not _ensure_gcc_available():
+                print("WARNING: gcc not found on PATH; the bridge may fail to build go-sqlite3 without a C compiler.")
             creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
             ps1 = PROJECT_ROOT / "scripts" / "run_whatsapp_bridge.ps1"
             if ps1.exists():

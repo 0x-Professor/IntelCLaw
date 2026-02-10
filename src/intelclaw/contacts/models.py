@@ -8,7 +8,8 @@ from typing import Optional
 class ContactEntry:
     name: str
     phone: str
+    gender: str = ""
     whatsapp_jid: Optional[str] = None
     inbound_allowed: bool = False
+    persona: str = ""
     notes: str = ""
-

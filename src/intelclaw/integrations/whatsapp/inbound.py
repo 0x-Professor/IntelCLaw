@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
+from intelclaw.contacts.models import ContactEntry
 from intelclaw.contacts.store import ContactsStore, normalize_phone
 from intelclaw.teams.mailbox import MailboxMessage, TeamMailbox
 
@@ -83,6 +84,18 @@ class WhatsAppInboundService:
     def _contacts_store(self) -> ContactsStore:
         return ContactsStore(Path("data") / "contacts.md")
 
+    def _resolve_contact_by_phone(self, sender_phone: str) -> Optional[ContactEntry]:
+        try:
+            phone_norm = normalize_phone(sender_phone)
+            if not phone_norm:
+                return None
+            for c in self._contacts_store().load():
+                if normalize_phone(c.phone) == phone_norm:
+                    return c
+        except Exception:
+            pass
+        return None
+
     async def run(self) -> None:
         logger.info("WhatsAppInboundService started")
         poll_seconds = float(self.config.get("whatsapp.inbound.poll_seconds", 5.0) or 5.0)
@@ -133,12 +146,29 @@ class WhatsAppInboundService:
                     if sender_norm not in allowlist and msg.chat_jid not in allowlist_jids:
                         continue
 
+                    contact = self._resolve_contact_by_phone(sender_norm)
+                    sender_name = (contact.name if contact and contact.name else None) or sender_norm
+
                     # Rate-limit replies per chat to avoid loops/spam.
                     last_reply = self._last_reply_ts_by_chat.get(msg.chat_jid, 0.0)
                     if time.time() - last_reply < min_reply_interval:
                         continue
 
-                    await self._handle_inbound_message(msg, db_path, context_n=context_n)
+                    # Always notify the user about inbound messages from allowlisted senders.
+                    await self._post_mailbox(
+                        session_id="whatsapp_inbound",
+                        kind="info",
+                        title=f"Incoming WhatsApp message from {sender_name}",
+                        body=f"{msg.content}\n\n(chat: {msg.chat_jid})",
+                        from_agent="whatsapp_inbound",
+                        meta={"chat_jid": msg.chat_jid, "sender": sender_norm},
+                    )
+
+                    # Only auto-reply when we have some persona/context for the sender.
+                    if not contact or not str(contact.persona or "").strip():
+                        continue
+
+                    await self._handle_inbound_message(msg, db_path, context_n=context_n, contact=contact)
                     self._last_reply_ts_by_chat[msg.chat_jid] = time.time()
 
                 self._save_state()
@@ -248,7 +278,14 @@ class WhatsAppInboundService:
         finally:
             conn.close()
 
-    async def _handle_inbound_message(self, msg: WhatsAppInboundMessage, db_path: Path, *, context_n: int) -> None:
+    async def _handle_inbound_message(
+        self,
+        msg: WhatsAppInboundMessage,
+        db_path: Path,
+        *,
+        context_n: int,
+        contact: ContactEntry,
+    ) -> None:
         if not self.llm_provider or not getattr(self.llm_provider, "llm", None):
             return
         if not self.tools:
@@ -258,7 +295,7 @@ class WhatsAppInboundService:
         context_rows = await asyncio.to_thread(self._fetch_chat_context, db_path, msg.chat_jid, limit=int(context_n))
 
         sender_norm = normalize_phone(msg.sender)
-        sender_name = self._resolve_sender_name(sender_norm) or sender_norm
+        sender_name = (contact.name if contact and contact.name else None) or sender_norm
 
         convo_lines = []
         for r in context_rows:
@@ -277,6 +314,7 @@ class WhatsAppInboundService:
         user = (
             f"Incoming message from {sender_name} (chat {msg.chat_jid}):\n"
             f"{msg.content}\n\n"
+            f"Contact persona/relationship context:\n{contact.persona}\n\n"
             f"Conversation context (last {context_n} messages):\n"
             f"{convo_text}\n\n"
             "Draft the best reply text to send back."
@@ -315,16 +353,6 @@ class WhatsAppInboundService:
                 meta={"chat_jid": msg.chat_jid, "sender": sender_norm},
             )
 
-    def _resolve_sender_name(self, sender_phone: str) -> Optional[str]:
-        try:
-            matches = self._contacts_store().lookup(sender_phone)
-            for m in matches:
-                if normalize_phone(m.phone) == sender_phone and m.name:
-                    return m.name
-        except Exception:
-            pass
-        return None
-
     async def _post_mailbox(
         self,
         *,
@@ -352,4 +380,3 @@ class WhatsAppInboundService:
             )
         except Exception:
             pass
-

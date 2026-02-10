@@ -545,7 +545,7 @@ class ToolRegistry:
             RagListDocumentsTool,
             RagDeleteDocumentTool,
         )
-        from intelclaw.tools.builtin.contacts import ContactsLookupTool, ContactsUpsertTool
+        from intelclaw.tools.builtin.contacts import ContactsLookupTool, ContactsSetInboundAllowedTool, ContactsUpsertTool
         
         builtin_tools = [
             # Search tools
@@ -592,6 +592,7 @@ class ToolRegistry:
             # Contacts (data/contacts.md)
             ContactsLookupTool(),
             ContactsUpsertTool(),
+            ContactsSetInboundAllowedTool(),
         ]
 
         # RAG ingestion tools (require MemoryManager)

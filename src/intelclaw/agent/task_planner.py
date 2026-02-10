@@ -261,7 +261,8 @@ IMPORTANT TOOL MAPPING:
 
 ### Contacts
 - To look up a saved contact (data/contacts.md): use "contacts_lookup" with args {{"query": "Alice"}}
-- To add/update a contact: use "contacts_upsert" with args {{"name": "Alice", "phone": "+923171156353", "inbound_allowed": true}}
+- To add/update a contact: use "contacts_upsert" with args {{"name": "Alice", "phone": "+923171156353", "gender": "female", "persona": "Friend. Keep tone casual.", "inbound_allowed": true, "resolve_whatsapp": true}}
+- To enable/disable inbound auto-replies: use "contacts_set_inbound_allowed" with args {{"query": "Alice", "allowed": true}}
 
 ### Shell & Code
 - For running commands: use "shell_command" with args {{"command": "..."}}
@@ -348,7 +349,10 @@ IMPORTANT TOOL MAPPING:
 ### WhatsApp MCP (mcp_whatsapp__*)
 - Phone numbers must be digits only (no "+", spaces, or symbols). Example: "923171156353"
 - Prefer using a chat JID when you have it (e.g. "923171156353@s.whatsapp.net" or "...@lid").
+- Resolve recipient by name: use "contacts_lookup" first, then send.
+- If the user explicitly asks to send a message, treat sending as approved (do not add a separate confirmation step) unless the recipient is ambiguous.
 - Send a message: use "mcp_whatsapp__send_message" with args {{"recipient": "923171156353", "message": "hi"}}
+- Never send tool errors/placeholders as the WhatsApp message text.
 
 ### Other
 - For taking screenshot: use "screenshot"
@@ -962,18 +966,126 @@ Return a JSON object:
         # WhatsApp MCP: normalize recipient phone numbers (strip '+' and formatting).
         if name in {"mcp_whatsapp__send_message", "mcp_whatsapp__send_file", "mcp_whatsapp__send_audio_message"}:
             if "recipient" not in args:
-                for alt in ("to", "phone", "phone_number", "jid"):
+                for alt in (
+                    "to",
+                    "phone",
+                    "phone_number",
+                    "jid",
+                    "chat_jid",
+                    "recipient_jid",
+                    "contact",
+                    "contact_name",
+                    "name",
+                    "recipient_name",
+                    "person",
+                    "user",
+                    "target",
+                ):
                     if alt in args:
                         args["recipient"] = args.pop(alt)
+                        break
+            if "message" not in args:
+                for alt in ("text", "content", "body", "msg"):
+                    if alt in args:
+                        args["message"] = args.pop(alt)
                         break
             rec = args.get("recipient")
             if isinstance(rec, str):
                 rec_s = rec.strip()
                 if rec_s and "@" not in rec_s:
-                    args["recipient"] = re.sub(r"\\D+", "", rec_s)
+                    digits = re.sub(r"\\D+", "", rec_s)
+                    if digits:
+                        args["recipient"] = digits
+                    else:
+                        # Best-effort: treat as a contact name and resolve from contacts.md.
+                        try:
+                            from pathlib import Path
+
+                            from intelclaw.contacts.store import ContactsStore
+
+                            store = ContactsStore(Path("data") / "contacts.md")
+                            matches = store.lookup(rec_s)
+                            if matches:
+                                exact = [m for m in matches if (m.name or "").strip().lower() == rec_s.lower()]
+                                m = exact[0] if exact else matches[0]
+                                args["recipient"] = m.whatsapp_jid or m.phone
+                        except Exception:
+                            pass
             return name, args
 
         return name, args
+
+    @staticmethod
+    def _try_parse_json(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, (dict, list)):
+            return value
+        if not isinstance(value, str):
+            return None
+        s = value.strip()
+        if not s:
+            return None
+        try:
+            return json.loads(s)
+        except Exception:
+            return None
+
+    def _infer_whatsapp_recipient_from_plan(self, plan: TaskPlan, step: TaskStep) -> Optional[str]:
+        """
+        When an LLM omits the required `recipient` argument for WhatsApp send tools,
+        best-effort infer it from earlier contacts_lookup results.
+        """
+        haystack = f"{step.title}\n{step.description}".lower()
+        candidates: List[tuple[str, str]] = []
+
+        for s in reversed(plan.completed_steps):
+            if s.tool != "contacts_lookup" or not s.result:
+                continue
+            parsed = self._try_parse_json(s.result)
+            if not parsed:
+                continue
+            rows = parsed if isinstance(parsed, list) else [parsed]
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                name = str(row.get("name") or "").strip()
+                recipient = str(row.get("whatsapp_jid") or row.get("phone") or "").strip()
+                if not recipient:
+                    continue
+                candidates.append((name, recipient))
+
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0][1]
+
+        # If we have multiple, try to match the name embedded in the step title/description.
+        matches = []
+        for name, recipient in candidates:
+            if name and name.lower() in haystack:
+                matches.append(recipient)
+
+        if len(matches) == 1:
+            return matches[0]
+
+        # Ambiguous; do not guess.
+        return None
+
+    def _infer_whatsapp_message_from_plan(self, plan: TaskPlan) -> Optional[str]:
+        """
+        Best-effort infer a WhatsApp message body from a prior "draft" step.
+        """
+        for s in reversed(plan.completed_steps):
+            t = str(s.title or "").lower()
+            if "draft" not in t and "compose" not in t and "write" not in t:
+                continue
+            if not s.result:
+                continue
+            msg = str(s.result).strip()
+            if msg:
+                return msg
+        return None
     
     async def _execute_step(
         self,
@@ -1019,6 +1131,19 @@ Return a JSON object:
                         step.tool_args = dict(rewritten_args or {})
                         tool_name = rewritten_name
                         tool_args = dict(rewritten_args or {})
+
+                    # Backfill missing WhatsApp send args from previous steps (common LLM omission).
+                    if tool_name in {"mcp_whatsapp__send_message", "mcp_whatsapp__send_file", "mcp_whatsapp__send_audio_message"}:
+                        if not tool_args.get("recipient"):
+                            inferred = self._infer_whatsapp_recipient_from_plan(plan, step)
+                            if inferred:
+                                tool_args["recipient"] = inferred
+                                step.tool_args = dict(tool_args)
+                        if tool_name == "mcp_whatsapp__send_message" and not tool_args.get("message"):
+                            inferred_msg = self._infer_whatsapp_message_from_plan(plan)
+                            if inferred_msg:
+                                tool_args["message"] = inferred_msg
+                                step.tool_args = dict(tool_args)
 
                     return await self.tools.execute(tool_name, tool_args)
 
