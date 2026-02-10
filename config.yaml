@@ -173,6 +173,7 @@ security:
 # WhatsApp (lharries/whatsapp-mcp)
 whatsapp:
   bridge_messages_db_path: data/vendor/whatsapp-mcp/whatsapp-bridge/store/messages.db
+  auto_start_bridge: true
   inbound:
     enabled: false
     context_messages: 50

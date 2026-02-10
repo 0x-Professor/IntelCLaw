@@ -100,6 +100,7 @@ class WebServer:
         self.port = port
         self._fallback_session_store = None
         self._fallback_session_store_lock = asyncio.Lock()
+        self._whatsapp_bridge_proc = None
         
         # Determine default model based on provider
         provider = os.getenv("INTELCLAW_PROVIDER", "github-models")
@@ -129,6 +130,95 @@ class WebServer:
         self._setup_routes()
         self._setup_event_subscriptions()
         self._server = None
+
+    @staticmethod
+    def _truthy_env(value: Optional[str]) -> Optional[bool]:
+        if value is None:
+            return None
+        s = str(value).strip().lower()
+        if s in {"1", "true", "yes", "y", "on"}:
+            return True
+        if s in {"0", "false", "no", "n", "off"}:
+            return False
+        return None
+
+    async def _maybe_autostart_whatsapp_bridge(self) -> None:
+        """
+        Best-effort auto-start for the WhatsApp bridge when the gateway starts.
+
+        Gated by:
+        - whatsapp skill enabled
+        - config `whatsapp.auto_start_bridge: true` (or env override)
+        """
+        import os
+        import subprocess
+        import sys
+
+        if sys.platform != "win32":
+            return
+
+        if not self._app:
+            return
+
+        skills = getattr(self._app, "skills", None)
+        if not skills:
+            return
+        try:
+            if not await skills.is_enabled("whatsapp"):
+                return
+        except Exception:
+            return
+
+        config = getattr(self._app, "config", None)
+        enabled = bool(config.get("whatsapp.auto_start_bridge", False)) if config else False
+
+        env_override = self._truthy_env(os.getenv("INTELCLAW_AUTOSTART_WHATSAPP_BRIDGE"))
+        if env_override is not None:
+            enabled = env_override
+
+        if not enabled:
+            return
+
+        # Avoid spawning multiple consoles in the same gateway process.
+        if self._whatsapp_bridge_proc is not None:
+            try:
+                if self._whatsapp_bridge_proc.poll() is None:
+                    return
+            except Exception:
+                pass
+
+        repo_root = Path(__file__).resolve().parents[3]
+        bridge_dir = repo_root / "data" / "vendor" / "whatsapp-mcp" / "whatsapp-bridge"
+        ps1 = repo_root / "scripts" / "run_whatsapp_bridge.ps1"
+
+        if not bridge_dir.exists():
+            logger.warning(
+                "WhatsApp bridge auto-start skipped (missing vendor repo). Run onboarding to install whatsapp-mcp."
+            )
+            return
+        if not ps1.exists():
+            logger.warning(f"WhatsApp bridge auto-start skipped (missing script): {ps1}")
+            return
+
+        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        try:
+            logger.info("Launching WhatsApp bridge in a new console (auto-start on gateway)...")
+            self._whatsapp_bridge_proc = subprocess.Popen(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(ps1),
+                    "-RepoRoot",
+                    str(repo_root),
+                ],
+                cwd=str(repo_root),
+                creationflags=creationflags,
+            )
+        except Exception as e:
+            logger.warning(f"WhatsApp bridge auto-start failed: {e}")
 
     def _get_sessions_db_path(self) -> str:
         """Best-effort: load sessions db path from config.yaml (if available)."""
@@ -1117,6 +1207,7 @@ Once configured, I'll be able to:
     
     async def start(self):
         """Start the web server."""
+        await self._maybe_autostart_whatsapp_bridge()
         config = uvicorn.Config(
             self.fastapi,
             host=self.host,
